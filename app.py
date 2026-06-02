@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or os.urandom(24).hex()
 
 # ---------------------------------------------------------------------------
 # AIDR Client Setup
@@ -430,9 +430,11 @@ def save_settings():
         session["ollama_url"] = data["ollama_url"]
 
     # Clear conversation when settings change
-    sid = session.get("session_id", "")
-    if sid in conversation_store:
-        del conversation_store[sid]
+    sid = session.get("active_chat_id", "")
+    if sid in chat_sessions:
+        del chat_sessions[sid]
+        _save_chat_sessions()
+        session.pop("active_chat_id", None)
 
     return jsonify({"status": "ok"})
 
