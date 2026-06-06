@@ -1,0 +1,4 @@
+## 2025-06-06 - [CRITICAL] Fixed Hardcoded Flask Secret Key
+**Vulnerability:** A fallback `FLASK_SECRET_KEY` was hardcoded as `"dev-secret-key-change-me"` in `app.py`. If the `.env` file was misconfigured or missing in production, the application used a predictable secret key, allowing attackers to sign/forge session cookies and potentially gain unauthorized access.
+**Learning:** Hardcoded default secrets are dangerous, even when intended purely as developer fallbacks, because they can easily leak into production environments and compromise the security of the framework's core session mechanism.
+**Prevention:** Instead of providing a static fallback string for sensitive values like `FLASK_SECRET_KEY`, use `secrets.token_hex()` to automatically generate a random, cryptographically secure key when the environment variable is absent. This prevents session forgery even in the absence of explicit configuration.

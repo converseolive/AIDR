@@ -6,6 +6,7 @@ Flask backend with CrowdStrike AIDR guardrails and multi-provider LLM support.
 import os
 import json
 import uuid
+import secrets
 import traceback
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
@@ -14,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
+app.secret_key = os.getenv("FLASK_SECRET_KEY", secrets.token_hex(32))
 
 # ---------------------------------------------------------------------------
 # AIDR Client Setup
