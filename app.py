@@ -289,17 +289,19 @@ def index():
 def list_chats():
     """Return all chat sessions (metadata only, no messages)."""
     chats = []
+    owner_id = session.get("session_id")
     for cid, s in chat_sessions.items():
-        chats.append({
-            "id": cid,
-            "title": s.get("title", "New Chat"),
-            "persona": s.get("persona", "customer_support"),
-            "aidr_triggered": s.get("aidr_triggered", False),
-            "aidr_block_count": s.get("aidr_block_count", 0),
-            "message_count": len(s.get("messages", [])),
-            "created_at": s.get("created_at"),
-            "updated_at": s.get("updated_at"),
-        })
+        if s.get("owner") == owner_id:
+            chats.append({
+                "id": cid,
+                "title": s.get("title", "New Chat"),
+                "persona": s.get("persona", "customer_support"),
+                "aidr_triggered": s.get("aidr_triggered", False),
+                "aidr_block_count": s.get("aidr_block_count", 0),
+                "message_count": len(s.get("messages", [])),
+                "created_at": s.get("created_at"),
+                "updated_at": s.get("updated_at"),
+            })
     # Sort by updated_at descending (most recent first)
     chats.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
     return jsonify({"chats": chats})
@@ -311,8 +313,12 @@ def create_chat():
     chat_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     persona_key = session.get("persona", "customer_support")
+    owner_id = session.get("session_id")
+    if not owner_id:
+        return jsonify({"error": "No active session"}), 401
     chat_sessions[chat_id] = {
         "id": chat_id,
+        "owner": owner_id,
         "title": "New Chat",
         "messages": [],
         "persona": persona_key,
@@ -333,6 +339,8 @@ def get_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    if s.get("owner") != session.get("session_id"):
+        return jsonify({"error": "Unauthorized"}), 403
     session["active_chat_id"] = chat_id
     return jsonify(s)
 
@@ -340,6 +348,12 @@ def get_chat(chat_id):
 @app.route("/api/chats/<chat_id>", methods=["DELETE"])
 def delete_chat(chat_id):
     """Delete a chat session."""
+    s = chat_sessions.get(chat_id)
+    if not s:
+        return jsonify({"error": "Chat not found"}), 404
+    if s.get("owner") != session.get("session_id"):
+        return jsonify({"error": "Unauthorized"}), 403
+
     if chat_id in chat_sessions:
         del chat_sessions[chat_id]
         _save_chat_sessions()
@@ -355,6 +369,8 @@ def rename_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    if s.get("owner") != session.get("session_id"):
+        return jsonify({"error": "Unauthorized"}), 403
     data = request.json or {}
     new_title = data.get("title", "").strip()
     if not new_title:
@@ -535,8 +551,12 @@ def chat():
         # Auto-create a session if none provided
         chat_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
+        owner_id = session.get("session_id")
+        if not owner_id:
+            return jsonify({"error": "No active session"}), 401
         chat_sessions[chat_id] = {
             "id": chat_id,
+            "owner": owner_id,
             "title": "New Chat",
             "messages": [],
             "persona": persona_key,
@@ -657,6 +677,8 @@ def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
     if chat_id and chat_id in chat_sessions:
+        if chat_sessions[chat_id].get("owner") != session.get("session_id"):
+            return jsonify({"error": "Unauthorized"}), 403
         chat_sessions[chat_id]["messages"] = []
         _save_chat_sessions()
     return jsonify({"status": "ok"})
