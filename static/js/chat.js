@@ -385,9 +385,15 @@ async function saveSettings() {
         provider: providerSelect.value,
         model: modelSelect.value,
         persona: personaSelect.value,
-        api_key: apiKeyInput.value,
         ollama_url: ollamaUrlInput.value,
     };
+
+    // Only send api_key if the user actually entered a new one.
+    // The field is intentionally left blank on load (password field),
+    // so sending an empty value would overwrite the saved key.
+    if (apiKeyInput.value.trim()) {
+        settings.api_key = apiKeyInput.value.trim();
+    }
 
     try {
         const resp = await fetch('/api/settings', {

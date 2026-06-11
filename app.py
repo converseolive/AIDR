@@ -424,8 +424,8 @@ def save_settings():
         session["model"] = data["model"]
     if "persona" in data:
         session["persona"] = data["persona"]
-    if "api_key" in data:
-        session["api_key"] = data["api_key"]
+    if "api_key" in data and data["api_key"].strip():
+        session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
         session["ollama_url"] = data["ollama_url"]
 
