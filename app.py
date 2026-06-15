@@ -7,6 +7,7 @@ import os
 import json
 import uuid
 import traceback
+import socket
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
@@ -417,6 +418,7 @@ def get_settings():
 @app.route("/api/settings", methods=["POST"])
 def save_settings():
     """Save settings to session."""
+    import urllib.parse
     data = request.json
     if "provider" in data:
         session["provider"] = data["provider"]
@@ -427,7 +429,31 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
-        session["ollama_url"] = data["ollama_url"]
+        ollama_url = data["ollama_url"].strip()
+        if not ollama_url:
+            session["ollama_url"] = ""
+        else:
+            try:
+                parsed = urllib.parse.urlparse(ollama_url)
+                if parsed.scheme not in ["http", "https"]:
+                    return jsonify({"error": "Invalid URL scheme for ollama_url"}), 400
+                if not parsed.hostname:
+                    return jsonify({"error": "Invalid hostname for ollama_url"}), 400
+
+                try:
+                    ip_address = socket.gethostbyname(parsed.hostname)
+                    if ip_address == "169.254.169.254":
+                        return jsonify({"error": "Access to metadata IP is blocked"}), 400
+                except socket.gaierror:
+                    # Ignore resolution errors, we'll just check the hostname
+                    pass
+
+                if parsed.hostname in ["169.254.169.254", "0xa9fea9fe", "2852039166", "::ffff:169.254.169.254"]:
+                    return jsonify({"error": "Access to metadata IP is blocked"}), 400
+
+                session["ollama_url"] = ollama_url
+            except Exception:
+                return jsonify({"error": "Invalid URL format for ollama_url"}), 400
 
     # Clear active chat's messages when settings change
     active_chat_id = session.get("active_chat_id", "")
