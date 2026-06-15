@@ -429,10 +429,11 @@ def save_settings():
     if "ollama_url" in data:
         session["ollama_url"] = data["ollama_url"]
 
-    # Clear conversation when settings change
-    sid = session.get("session_id", "")
-    if sid in conversation_store:
-        del conversation_store[sid]
+    # Clear active chat's messages when settings change
+    active_chat_id = session.get("active_chat_id", "")
+    if active_chat_id and active_chat_id in chat_sessions:
+        chat_sessions[active_chat_id]["messages"] = []
+        _save_chat_sessions()
 
     return jsonify({"status": "ok"})
 
