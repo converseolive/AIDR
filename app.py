@@ -10,6 +10,9 @@ import traceback
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
+from urllib.parse import urlparse
+import ipaddress
+import socket
 
 load_dotenv()
 
@@ -300,6 +303,22 @@ def call_llm(messages, settings):
 
 
 # ---------------------------------------------------------------------------
+# Security Helpers
+# ---------------------------------------------------------------------------
+def is_safe_url(url):
+    """Validate URL to prevent SSRF against metadata services."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        ip = ipaddress.ip_address(socket.gethostbyname(parsed.hostname))
+        if str(ip).startswith("169.254."):
+            return False
+        return True
+    except Exception:
+        return False
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @app.route("/")
@@ -455,7 +474,10 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
-        session["ollama_url"] = data["ollama_url"]
+        url = data["ollama_url"]
+        if not is_safe_url(url):
+            return jsonify({"error": "Invalid or unsafe Ollama URL."}), 400
+        session["ollama_url"] = url
 
     # Clear active chat's messages when settings change
     active_chat_id = session.get("active_chat_id", "")
@@ -473,6 +495,8 @@ def get_models():
 
     if provider == "ollama":
         ollama_url = session.get("ollama_url", "http://localhost:11434")
+        if not is_safe_url(ollama_url):
+            return jsonify({"error": "Invalid or unsafe Ollama URL."}), 400
         try:
             import requests as req
             resp = req.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=5)
