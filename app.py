@@ -104,7 +104,7 @@ PERSONAS = {
 DEFAULT_MODELS = {
     "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
     "anthropic": ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
-    "gemini": ["gemma-4-26b-a4b-it"],
+    "gemini": ["gemma-4-26b-a4b-it", "gemini-3.1-flash-lite", "gemma-4-31b-it"],
     "ollama": [],  # Fetched dynamically from the Ollama instance
 }
 
@@ -201,6 +201,7 @@ def call_anthropic(messages, api_key, model):
 
 def call_gemini(messages, api_key, model):
     """Call Google Gemini API using the new google-genai library."""
+    import time
     from google import genai
     from google.genai import types
 
@@ -241,25 +242,45 @@ def call_gemini(messages, api_key, model):
             system_instruction=system_instruction,
         ) if system_instruction else None
 
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=config,
-        )
-        return response.text
-    except Exception as e:
-        error_str = str(e)
-        if "404" in error_str or "not found" in error_str.lower():
-            raise ValueError(
-                f"Model '{model}' was not found. Please check your Gemini API key has access to this model."
+    # Retry logic for transient 500 errors from the Gemini API
+    max_retries = 3
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
             )
-        elif "401" in error_str or "403" in error_str or "API key" in error_str.lower():
-            raise ValueError(
-                "Invalid or missing Gemini API key. Please check your API key in Settings."
-            )
-        else:
-            raise
+            return response.text
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+
+            # Don't retry client errors — only transient server errors
+            if "404" in error_str or "not found" in error_str.lower():
+                raise ValueError(
+                    f"Model '{model}' was not found. Please check your Gemini API key has access to this model."
+                )
+            elif "401" in error_str or "403" in error_str or "API key" in error_str.lower():
+                raise ValueError(
+                    "Invalid or missing Gemini API key. Please check your API key in Settings."
+                )
+            elif "500" in error_str or "internal" in error_str.lower():
+                # Transient server error — retry with backoff
+                if attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 2  # 2s, 4s
+                    print(f"[Gemini] ⚠️  500 error on attempt {attempt + 1}/{max_retries}, retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise
+            else:
+                raise
+
+    # Should not reach here, but just in case
+    raise last_error
 
 
 def call_ollama(messages, ollama_url, model):
