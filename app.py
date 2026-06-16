@@ -104,7 +104,7 @@ PERSONAS = {
 DEFAULT_MODELS = {
     "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
     "anthropic": ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
-    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash", "gemini-3-pro"],
+    "gemini": ["gemma-4-26b-a4b-it"],
     "ollama": [],  # Fetched dynamically from the Ollama instance
 }
 
@@ -221,9 +221,25 @@ def call_gemini(messages, api_key, model):
                 )
             )
 
-    config = types.GenerateContentConfig(
-        system_instruction=system_instruction,
-    ) if system_instruction else None
+    # Gemma models don't support system_instruction — prepend as a user turn instead
+    is_gemma = model.lower().startswith("gemma")
+
+    if is_gemma and system_instruction:
+        # Insert system prompt as the first user message
+        contents.insert(0, types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=f"[System Instructions]\n{system_instruction}")]
+        ))
+        # Gemma expects alternating user/model turns, add a model acknowledgement
+        contents.insert(1, types.Content(
+            role="model",
+            parts=[types.Part.from_text(text="Understood. I will follow these instructions.")]
+        ))
+        config = None
+    else:
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+        ) if system_instruction else None
 
     try:
         response = client.models.generate_content(
@@ -236,8 +252,7 @@ def call_gemini(messages, api_key, model):
         error_str = str(e)
         if "404" in error_str or "not found" in error_str.lower():
             raise ValueError(
-                f"Model '{model}' was not found. Please select a valid Gemini model in Settings. "
-                f"Available models include: gemini-2.5-flash, gemini-2.5-pro, gemini-3-flash, gemini-3-pro"
+                f"Model '{model}' was not found. Please check your Gemini API key has access to this model."
             )
         elif "401" in error_str or "403" in error_str or "API key" in error_str.lower():
             raise ValueError(
