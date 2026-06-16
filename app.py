@@ -104,7 +104,7 @@ PERSONAS = {
 DEFAULT_MODELS = {
     "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
     "anthropic": ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-opus-20240229"],
-    "gemini": ["gemma-4-26b-a4b-it", "gemini-3.1-flash-lite-preview"],
+    "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash", "gemini-3-pro"],
     "ollama": [],  # Fetched dynamically from the Ollama instance
 }
 
@@ -225,13 +225,26 @@ def call_gemini(messages, api_key, model):
         system_instruction=system_instruction,
     ) if system_instruction else None
 
-    response = client.models.generate_content(
-        model=model,
-        contents=contents,
-        config=config,
-    )
-    
-    return response.text
+    try:
+        response = client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=config,
+        )
+        return response.text
+    except Exception as e:
+        error_str = str(e)
+        if "404" in error_str or "not found" in error_str.lower():
+            raise ValueError(
+                f"Model '{model}' was not found. Please select a valid Gemini model in Settings. "
+                f"Available models include: gemini-2.5-flash, gemini-2.5-pro, gemini-3-flash, gemini-3-pro"
+            )
+        elif "401" in error_str or "403" in error_str or "API key" in error_str.lower():
+            raise ValueError(
+                "Invalid or missing Gemini API key. Please check your API key in Settings."
+            )
+        else:
+            raise
 
 
 def call_ollama(messages, ollama_url, model):
