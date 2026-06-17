@@ -7,6 +7,7 @@ import os
 import json
 import uuid
 import traceback
+import secrets
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
@@ -14,7 +15,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
+# SECURITY: Never use a hardcoded fallback (e.g. "dev-secret-key").
+# Generate a random 32-byte hex if FLASK_SECRET_KEY is missing to prevent forging session cookies.
+app.secret_key = os.getenv("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
 # ---------------------------------------------------------------------------
 # AIDR Client Setup
