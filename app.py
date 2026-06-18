@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
+# SECURITY: Never hardcode secret keys. Use environment variables or generate a random one to prevent session hijacking.
+app.secret_key = os.getenv("FLASK_SECRET_KEY", os.urandom(24))
 
 # ---------------------------------------------------------------------------
 # AIDR Client Setup
