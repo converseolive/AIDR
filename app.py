@@ -7,11 +7,52 @@ import os
 import json
 import uuid
 import traceback
+import urllib.parse
+import ipaddress
+import socket
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ---------------------------------------------------------------------------
+# Security: SSRF Validation
+# ---------------------------------------------------------------------------
+def is_safe_url(url):
+    """
+    Validate URLs to prevent Server-Side Request Forgery (SSRF).
+    Allows empty strings (for unsetting configs).
+    Blocks non-HTTP/HTTPS schemes and internal/metadata IPs.
+    Allows loopback (localhost) for local LLM usage (e.g. Ollama).
+    """
+    if not url:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return False
+        if not parsed.hostname:
+            return False
+
+        # Resolve hostname to IP
+        try:
+            ip_str = socket.gethostbyname(parsed.hostname)
+            ip = ipaddress.ip_address(ip_str)
+
+            if ip.is_loopback:
+                return True
+
+            if ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+                return False
+
+            return True
+        except (socket.gaierror, ValueError):
+            # Fail securely: if we cannot resolve the host, block the request
+            return False
+
+    except Exception:
+        return False
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
@@ -432,6 +473,9 @@ def aidr_config():
     if not token:
         return jsonify({"error": "AIDR token is required."}), 400
 
+    if base_url and not is_safe_url(base_url):
+        return jsonify({"error": "Invalid or unsafe AIDR Base URL."}), 400
+
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
@@ -476,7 +520,10 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
-        session["ollama_url"] = data["ollama_url"]
+        ollama_url = data["ollama_url"]
+        if ollama_url and not is_safe_url(ollama_url):
+            return jsonify({"error": "Invalid or unsafe Ollama URL."}), 400
+        session["ollama_url"] = ollama_url
 
     # Clear active chat's messages when settings change
     active_chat_id = session.get("active_chat_id", "")
