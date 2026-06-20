@@ -7,11 +7,50 @@ import os
 import json
 import uuid
 import traceback
+import ipaddress
+import socket
+from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
 
 load_dotenv()
+
+def is_safe_url(url, allow_local=False):
+    """Validate URLs to prevent SSRF and DoS."""
+    if not url:
+        return True
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        try:
+            ip = ipaddress.ip_address(hostname)
+        except ValueError:
+            executor = ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(socket.getaddrinfo, hostname, None)
+            try:
+                addrinfo = future.result(timeout=2)
+                executor.shutdown(wait=False)
+                # addrinfo is a list of tuples: (family, type, proto, canonname, sockaddr)
+                # sockaddr for IPv4 is (address, port), for IPv6 is (address, port, flow info, scope id)
+                ip_str = addrinfo[0][4][0]
+                ip = ipaddress.ip_address(ip_str)
+            except Exception:
+                executor.shutdown(wait=False, cancel_futures=True)
+                return False
+        if str(ip).startswith("169.254.") or ip.is_multicast:
+            return False
+        if not allow_local and (ip.is_private or ip.is_loopback):
+            return False
+        return True
+    except Exception:
+        return False
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
@@ -435,6 +474,9 @@ def aidr_config():
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
+    if not is_safe_url(base_url, allow_local=False):
+        return jsonify({"error": "Invalid or unsafe AIDR base URL."}), 400
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
@@ -476,6 +518,8 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
+        if not is_safe_url(data["ollama_url"], allow_local=True):
+            return jsonify({"error": "Invalid or unsafe Ollama URL."}), 400
         session["ollama_url"] = data["ollama_url"]
 
     # Clear active chat's messages when settings change
