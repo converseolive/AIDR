@@ -7,8 +7,59 @@ import os
 import json
 import uuid
 import traceback
+import urllib.parse
+import ipaddress
+import socket
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
+
+
+def validate_url(url, allow_local=False):
+    """
+    Validates a URL against SSRF vulnerabilities by checking the resolved IP address.
+    Args:
+        url (str): The URL to validate.
+        allow_local (bool): Whether to allow private and loopback IP addresses.
+    Returns:
+        bool: True if the URL is safe or empty, False if it is potentially unsafe.
+    """
+    if not url:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(socket.getaddrinfo, hostname, None)
+        try:
+            addr_info = future.result(timeout=2.0)
+        except Exception:
+            executor.shutdown(wait=False, cancel_futures=True)
+            return False
+
+        is_safe = True
+        for result in addr_info:
+            ip_str = result[4][0]
+            if '%' in ip_str:
+                ip_str = ip_str.split('%')[0]
+            ip = ipaddress.ip_address(ip_str)
+
+            if ip.is_multicast or ip.is_link_local:
+                is_safe = False
+                break
+
+            if not allow_local:
+                if ip.is_private or ip.is_loopback:
+                    is_safe = False
+                    break
+
+        executor.shutdown(wait=False)
+        return is_safe
+    except Exception:
+        return False
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,14 +76,22 @@ def init_aidr():
     """Initialize the CrowdStrike AIDR client."""
     global aidr_client
     token = os.getenv("AIDR_TOKEN", "").strip()
+    base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
+
     if not token:
         print("[AIDR] ⚠️  No AIDR token configured. Enter one via Settings in the UI.")
         aidr_client = None
         return
+
+    if not validate_url(base_url, allow_local=False):
+        print(f"[AIDR] ⚠️  Invalid AIDR_BASE_URL: {base_url}. Potential SSRF detected.")
+        aidr_client = None
+        return
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
-            base_url_template=os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard"),
+            base_url_template=base_url,
             token=token,
         )
         print("[AIDR] ✅ AIGuard client initialized successfully.")
@@ -435,6 +494,9 @@ def aidr_config():
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
+    if not validate_url(base_url, allow_local=False):
+        return jsonify({"error": "Invalid base_url: Potential SSRF detected."}), 400
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
@@ -476,6 +538,8 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
+        if not validate_url(data["ollama_url"], allow_local=True):
+            return jsonify({"error": "Invalid ollama_url: Potential SSRF detected."}), 400
         session["ollama_url"] = data["ollama_url"]
 
     # Clear active chat's messages when settings change
