@@ -17,6 +17,54 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
 
 # ---------------------------------------------------------------------------
+# Security Helpers
+# ---------------------------------------------------------------------------
+def validate_url_for_ssrf(url, allow_private=False):
+    """Validate URLs to prevent SSRF vulnerabilities."""
+    if not url:
+        return True
+
+    import urllib.parse
+    import socket
+    import ipaddress
+    from concurrent.futures import ThreadPoolExecutor
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(socket.getaddrinfo, hostname, None)
+        try:
+            addr_info = future.result(timeout=2.0)
+        except Exception:
+            return False
+        finally:
+            import sys
+            if sys.version_info >= (3, 9):
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=False)
+
+        for res in addr_info:
+            ip_str = res[4][0]
+            ip = ipaddress.ip_address(ip_str)
+
+            if ip.is_multicast or ip.is_link_local or ip.is_unspecified:
+                return False
+
+            if not allow_private:
+                if ip.is_private or ip.is_loopback:
+                    return False
+        return True
+    except Exception:
+        return False
+
+# ---------------------------------------------------------------------------
 # AIDR Client Setup
 # ---------------------------------------------------------------------------
 aidr_client = None
@@ -435,6 +483,9 @@ def aidr_config():
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
+    if not validate_url_for_ssrf(base_url, allow_private=False):
+        return jsonify({"error": "Invalid base_url: security policy violation."}), 400
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
@@ -476,6 +527,8 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
+        if not validate_url_for_ssrf(data["ollama_url"], allow_private=True):
+            return jsonify({"error": "Invalid ollama_url: security policy violation."}), 400
         session["ollama_url"] = data["ollama_url"]
 
     # Clear active chat's messages when settings change
