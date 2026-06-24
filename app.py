@@ -337,8 +337,16 @@ def index():
 @app.route("/api/chats", methods=["GET"])
 def list_chats():
     """Return all chat sessions (metadata only, no messages)."""
+    user_id = session.get("session_id")
+    if not user_id:
+        import uuid
+        user_id = str(uuid.uuid4())
+        session["session_id"] = user_id
+
     chats = []
     for cid, s in chat_sessions.items():
+        if s.get("session_id") != user_id:
+            continue
         chats.append({
             "id": cid,
             "title": s.get("title", "New Chat"),
@@ -357,11 +365,18 @@ def list_chats():
 @app.route("/api/chats", methods=["POST"])
 def create_chat():
     """Create a new chat session."""
+    user_id = session.get("session_id")
+    if not user_id:
+        import uuid
+        user_id = str(uuid.uuid4())
+        session["session_id"] = user_id
+
     chat_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     persona_key = session.get("persona", "customer_support")
     chat_sessions[chat_id] = {
         "id": chat_id,
+        "session_id": user_id,
         "title": "New Chat",
         "messages": [],
         "persona": persona_key,
@@ -382,6 +397,8 @@ def get_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    if s.get("session_id") and s.get("session_id") != session.get("session_id"):
+        return jsonify({"error": "Forbidden"}), 403
     session["active_chat_id"] = chat_id
     return jsonify(s)
 
@@ -389,7 +406,10 @@ def get_chat(chat_id):
 @app.route("/api/chats/<chat_id>", methods=["DELETE"])
 def delete_chat(chat_id):
     """Delete a chat session."""
-    if chat_id in chat_sessions:
+    s = chat_sessions.get(chat_id)
+    if s:
+        if s.get("session_id") and s.get("session_id") != session.get("session_id"):
+            return jsonify({"error": "Forbidden"}), 403
         del chat_sessions[chat_id]
         _save_chat_sessions()
         # If this was the active chat, clear it
@@ -404,6 +424,8 @@ def rename_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    if s.get("session_id") and s.get("session_id") != session.get("session_id"):
+        return jsonify({"error": "Forbidden"}), 403
     data = request.json or {}
     new_title = data.get("title", "").strip()
     if not new_title:
@@ -481,8 +503,10 @@ def save_settings():
     # Clear active chat's messages when settings change
     active_chat_id = session.get("active_chat_id", "")
     if active_chat_id and active_chat_id in chat_sessions:
-        chat_sessions[active_chat_id]["messages"] = []
-        _save_chat_sessions()
+        s = chat_sessions[active_chat_id]
+        if s.get("session_id") == session.get("session_id") or not s.get("session_id"):
+            s["messages"] = []
+            _save_chat_sessions()
 
     return jsonify({"status": "ok"})
 
@@ -583,10 +607,17 @@ def chat():
     # Resolve the chat session
     if not chat_id or chat_id not in chat_sessions:
         # Auto-create a session if none provided
+        user_id = session.get("session_id")
+        if not user_id:
+            import uuid
+            user_id = str(uuid.uuid4())
+            session["session_id"] = user_id
+
         chat_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         chat_sessions[chat_id] = {
             "id": chat_id,
+            "session_id": user_id,
             "title": "New Chat",
             "messages": [],
             "persona": persona_key,
@@ -597,6 +628,8 @@ def chat():
         }
 
     chat_session = chat_sessions[chat_id]
+    if chat_session.get("session_id") and chat_session.get("session_id") != session.get("session_id"):
+        return jsonify({"error": "Forbidden"}), 403
     history = chat_session["messages"]
 
     # Build messages with persona system prompt
@@ -707,7 +740,10 @@ def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
     if chat_id and chat_id in chat_sessions:
-        chat_sessions[chat_id]["messages"] = []
+        s = chat_sessions[chat_id]
+        if s.get("session_id") and s.get("session_id") != session.get("session_id"):
+            return jsonify({"error": "Forbidden"}), 403
+        s["messages"] = []
         _save_chat_sessions()
     return jsonify({"status": "ok"})
 
