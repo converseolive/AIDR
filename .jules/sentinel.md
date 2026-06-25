@@ -1,0 +1,4 @@
+## 2026-06-25 - IDOR in Global State Chat Sessions
+**Vulnerability:** Insecure Direct Object Reference (IDOR) across all chat endpoints (`/api/chats`, `/api/chat`, `/api/clear`). Any user could read, rename, modify, or delete chat sessions of other users by predicting or knowing their `chat_id`.
+**Learning:** The application stored chat histories in a global dictionary (`chat_sessions`) keyed by `chat_id` and failed to associate these chat objects with their creators. The endpoints only relied on the existence of a `chat_id` without verifying ownership against the requester's `session_id`.
+**Prevention:** Always bind globally stored objects to the identity of their creator (e.g., storing `session_id` within the chat object). Enforce strict authorization checks on every state-mutating and state-reading endpoint by verifying that the requested resource's owner matches the requesting user's identity before processing the request.
