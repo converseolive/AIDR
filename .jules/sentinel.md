@@ -1,0 +1,4 @@
+## 2025-06-26 - [Fix IDOR in chat endpoints]
+**Vulnerability:** Chat endpoints (`/api/chats`, `/api/chats/<id>`, `/api/chat`, etc.) were missing authorization checks. Any user could access, modify, list, or delete another user's chat sessions simply by knowing the chat ID, because the application did not verify if the current user was the creator of the chat object.
+**Learning:** In applications utilizing UUID-based identifiers, it is essential not to assume the ID itself provides authorization. Without validating the user identity tied to the resource (via session context), an Insecure Direct Object Reference (IDOR) exists.
+**Prevention:** Always record the creator's identity (`session_id`, `user_id`, etc.) in the created resource. For all subsequent read/modify/delete operations, explicitly verify that the active user's identity matches the resource's owner before allowing the operation.

@@ -323,6 +323,11 @@ def call_llm(messages, settings):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.before_request
+def ensure_session_id():
+    if "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+
 @app.route("/")
 def index():
     """Serve the chat page."""
@@ -339,6 +344,8 @@ def list_chats():
     """Return all chat sessions (metadata only, no messages)."""
     chats = []
     for cid, s in chat_sessions.items():
+        if s.get("session_id") != session.get("session_id"):
+            continue
         chats.append({
             "id": cid,
             "title": s.get("title", "New Chat"),
@@ -363,6 +370,7 @@ def create_chat():
     chat_sessions[chat_id] = {
         "id": chat_id,
         "title": "New Chat",
+        "session_id": session.get("session_id"),
         "messages": [],
         "persona": persona_key,
         "aidr_triggered": False,
@@ -380,7 +388,7 @@ def create_chat():
 def get_chat(chat_id):
     """Load a specific chat session with full messages."""
     s = chat_sessions.get(chat_id)
-    if not s:
+    if not s or s.get("session_id") != session.get("session_id"):
         return jsonify({"error": "Chat not found"}), 404
     session["active_chat_id"] = chat_id
     return jsonify(s)
@@ -389,6 +397,9 @@ def get_chat(chat_id):
 @app.route("/api/chats/<chat_id>", methods=["DELETE"])
 def delete_chat(chat_id):
     """Delete a chat session."""
+    s = chat_sessions.get(chat_id)
+    if not s or s.get("session_id") != session.get("session_id"):
+        return jsonify({"error": "Not found"}), 404
     if chat_id in chat_sessions:
         del chat_sessions[chat_id]
         _save_chat_sessions()
@@ -402,7 +413,7 @@ def delete_chat(chat_id):
 def rename_chat(chat_id):
     """Rename a chat session."""
     s = chat_sessions.get(chat_id)
-    if not s:
+    if not s or s.get("session_id") != session.get("session_id"):
         return jsonify({"error": "Chat not found"}), 404
     data = request.json or {}
     new_title = data.get("title", "").strip()
@@ -587,6 +598,7 @@ def chat():
         now = datetime.now(timezone.utc).isoformat()
         chat_sessions[chat_id] = {
             "id": chat_id,
+            "session_id": session.get("session_id"),
             "title": "New Chat",
             "messages": [],
             "persona": persona_key,
@@ -597,6 +609,8 @@ def chat():
         }
 
     chat_session = chat_sessions[chat_id]
+    if chat_session.get("session_id") != session.get("session_id"):
+        return jsonify({"error": "Chat not found"}), 404
     history = chat_session["messages"]
 
     # Build messages with persona system prompt
@@ -707,8 +721,9 @@ def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
     if chat_id and chat_id in chat_sessions:
-        chat_sessions[chat_id]["messages"] = []
-        _save_chat_sessions()
+        if chat_sessions[chat_id].get("session_id") == session.get("session_id"):
+            chat_sessions[chat_id]["messages"] = []
+            _save_chat_sessions()
     return jsonify({"status": "ok"})
 
 
