@@ -323,11 +323,16 @@ def call_llm(messages, settings):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.before_request
+def ensure_session_id():
+    """Ensure every request has a session ID for security and isolation."""
+    if "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+
+
 @app.route("/")
 def index():
     """Serve the chat page."""
-    if "session_id" not in session:
-        session["session_id"] = str(uuid.uuid4())
     return render_template("index.html")
 
 
@@ -336,9 +341,11 @@ def index():
 # ---------------------------------------------------------------------------
 @app.route("/api/chats", methods=["GET"])
 def list_chats():
-    """Return all chat sessions (metadata only, no messages)."""
+    """Return all chat sessions (metadata only, no messages) belonging to the user."""
     chats = []
     for cid, s in chat_sessions.items():
+        if s.get("session_id") != session.get("session_id"):
+            continue
         chats.append({
             "id": cid,
             "title": s.get("title", "New Chat"),
@@ -369,6 +376,7 @@ def create_chat():
         "aidr_block_count": 0,
         "created_at": now,
         "updated_at": now,
+        "session_id": session["session_id"],  # Tie chat to creator for IDOR protection
     }
     # Set as active chat
     session["active_chat_id"] = chat_id
@@ -380,7 +388,7 @@ def create_chat():
 def get_chat(chat_id):
     """Load a specific chat session with full messages."""
     s = chat_sessions.get(chat_id)
-    if not s:
+    if not s or s.get("session_id") != session.get("session_id"):
         return jsonify({"error": "Chat not found"}), 404
     session["active_chat_id"] = chat_id
     return jsonify(s)
@@ -389,7 +397,10 @@ def get_chat(chat_id):
 @app.route("/api/chats/<chat_id>", methods=["DELETE"])
 def delete_chat(chat_id):
     """Delete a chat session."""
-    if chat_id in chat_sessions:
+    s = chat_sessions.get(chat_id)
+    if s:
+        if s.get("session_id") != session.get("session_id"):
+            return jsonify({"error": "Unauthorized"}), 403
         del chat_sessions[chat_id]
         _save_chat_sessions()
         # If this was the active chat, clear it
@@ -402,7 +413,7 @@ def delete_chat(chat_id):
 def rename_chat(chat_id):
     """Rename a chat session."""
     s = chat_sessions.get(chat_id)
-    if not s:
+    if not s or s.get("session_id") != session.get("session_id"):
         return jsonify({"error": "Chat not found"}), 404
     data = request.json or {}
     new_title = data.get("title", "").strip()
@@ -594,9 +605,13 @@ def chat():
             "aidr_block_count": 0,
             "created_at": now,
             "updated_at": now,
+            "session_id": session["session_id"],  # Tie chat to creator for IDOR protection
         }
 
     chat_session = chat_sessions[chat_id]
+    if chat_session.get("session_id") != session.get("session_id"):
+        return jsonify({"error": "Chat not found or access denied"}), 404
+
     history = chat_session["messages"]
 
     # Build messages with persona system prompt
@@ -707,8 +722,9 @@ def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
     if chat_id and chat_id in chat_sessions:
-        chat_sessions[chat_id]["messages"] = []
-        _save_chat_sessions()
+        if chat_sessions[chat_id].get("session_id") == session.get("session_id"):
+            chat_sessions[chat_id]["messages"] = []
+            _save_chat_sessions()
     return jsonify({"status": "ok"})
 
 
