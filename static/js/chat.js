@@ -111,6 +111,13 @@ const WELCOME_CARDS = {
 // Initialize
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize Theme
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'light') {
+        document.body.classList.add('light-mode');
+    }
+    updateThemeIcons();
+    
     loadSettings();
     checkAidrStatus();
     loadChatList();
@@ -243,10 +250,50 @@ function setupEventListeners() {
     if (newChatBtn) {
         newChatBtn.addEventListener('click', createNewChat);
     }
+
+    // Setup hint click
+    if (setupHint) {
+        setupHint.addEventListener('click', openSettings);
+    }
+
+    // Theme Toggle
+    const themeToggleBtn = document.getElementById('themeToggleBtn');
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', toggleTheme);
+    }
 }
 
 // ============================================================
-// AIDR Status & Configuration
+// Theme Toggle Logic
+// ============================================================
+function toggleTheme() {
+    const body = document.body;
+    body.classList.toggle('light-mode');
+    
+    if (body.classList.contains('light-mode')) {
+        localStorage.setItem('theme', 'light');
+    } else {
+        localStorage.setItem('theme', 'dark');
+    }
+    
+    updateThemeIcons();
+}
+
+function updateThemeIcons() {
+    const moonIcon = document.querySelector('.icon-moon');
+    const sunIcon = document.querySelector('.icon-sun');
+    
+    if (document.body.classList.contains('light-mode')) {
+        if (moonIcon) moonIcon.classList.remove('hidden');
+        if (sunIcon) sunIcon.classList.add('hidden');
+    } else {
+        if (moonIcon) moonIcon.classList.add('hidden');
+        if (sunIcon) sunIcon.classList.remove('hidden');
+    }
+}
+
+// ============================================================
+// Settings
 // ============================================================
 async function checkAidrStatus() {
     try {
