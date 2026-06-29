@@ -1273,6 +1273,45 @@ body[data-persona="customer_support"] .new-chat-btn:hover {
     box-shadow: 0 4px 12px rgba(52, 211, 153, 0.3);
 }
 
+/* --- Forget Credentials Button --- */
+.forget-credentials-group {
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.forget-credentials-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 16px;
+    background: transparent;
+    border: 1px solid rgba(255, 0, 60, 0.25);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-family: var(--font-family);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.forget-credentials-btn:hover {
+    background: rgba(255, 0, 60, 0.08);
+    border-color: rgba(255, 0, 60, 0.5);
+    color: var(--danger);
+}
+
+.forget-credentials-btn:hover svg {
+    stroke: var(--danger);
+}
+
+.forget-credentials-btn:active {
+    transform: scale(0.98);
+}
+
 /* ============================================================
    Error Message
    ============================================================ */

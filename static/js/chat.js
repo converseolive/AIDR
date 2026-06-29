@@ -57,6 +57,7 @@ const aidrConnectBtn = document.getElementById('aidrConnectBtn');
 const aidrConnectText = document.getElementById('aidrConnectText');
 const aidrConnectStatus = document.getElementById('aidrConnectStatus');
 const toggleAidrKeyBtn = document.getElementById('toggleAidrKeyBtn');
+const forgetCredentialsBtn = document.getElementById('forgetCredentialsBtn');
 
 // Setup Banner
 const setupBanner = document.getElementById('setupBanner');
@@ -74,6 +75,19 @@ let isAidrConfigured = false;
 let hasApiKey = false;
 let activeChatId = null;
 let chats = [];
+
+// ============================================================
+// LocalStorage Persistence Keys
+// ============================================================
+const LS_KEYS = {
+    API_KEY: 'aidr_app_api_key',
+    AIDR_TOKEN: 'aidr_app_aidr_token',
+    AIDR_BASE_URL: 'aidr_app_aidr_base_url',
+    PROVIDER: 'aidr_app_provider',
+    MODEL: 'aidr_app_model',
+    PERSONA: 'aidr_app_persona',
+    OLLAMA_URL: 'aidr_app_ollama_url',
+};
 
 const PERSONA_HINTS = {
     customer_support: 'Friendly and professional support agent.',
@@ -110,7 +124,7 @@ const WELCOME_CARDS = {
 // ============================================================
 // Initialize
 // ============================================================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Initialize Theme
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme === 'light') {
@@ -118,7 +132,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     updateThemeIcons();
     
-    loadSettings();
+    await loadSettings();
+    await restoreSavedCredentials();
     checkAidrStatus();
     loadChatList();
     setupEventListeners();
@@ -187,6 +202,15 @@ function setupEventListeners() {
     // AIDR Connect
     if (aidrConnectBtn) {
         aidrConnectBtn.addEventListener('click', connectAidr);
+    }
+
+    // Forget Saved Credentials
+    if (forgetCredentialsBtn) {
+        forgetCredentialsBtn.addEventListener('click', () => {
+            if (confirm('Are you sure you want to clear all saved API keys and tokens from this browser?')) {
+                forgetSavedCredentials();
+            }
+        });
     }
 
     // Refresh models
@@ -338,6 +362,12 @@ async function connectAidr() {
             aidrConnectStatus.textContent = 'AIDR is active and protecting your conversations.';
             aidrConnectStatus.className = 'aidr-connect-status success';
 
+            // Persist AIDR credentials to localStorage
+            localStorage.setItem(LS_KEYS.AIDR_TOKEN, token);
+            if (baseUrl) {
+                localStorage.setItem(LS_KEYS.AIDR_BASE_URL, baseUrl);
+            }
+
             // Update header badge
             aidrBadge.classList.remove('aidr-disabled');
             aidrBadge.setAttribute('aria-pressed', 'true');
@@ -453,6 +483,15 @@ async function saveSettings() {
             // Track API key state
             if (apiKeyInput.value.trim()) {
                 hasApiKey = true;
+            }
+
+            // Persist to localStorage
+            localStorage.setItem(LS_KEYS.PROVIDER, settings.provider);
+            localStorage.setItem(LS_KEYS.MODEL, settings.model);
+            localStorage.setItem(LS_KEYS.PERSONA, settings.persona);
+            localStorage.setItem(LS_KEYS.OLLAMA_URL, settings.ollama_url);
+            if (settings.api_key) {
+                localStorage.setItem(LS_KEYS.API_KEY, settings.api_key);
             }
 
             // Visual feedback
@@ -927,6 +966,149 @@ function scrollToBottom() {
 function autoResizeTextarea() {
     chatInput.style.height = 'auto';
     chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+}
+
+// ============================================================
+// Credential Persistence (localStorage)
+// ============================================================
+
+/**
+ * Restore saved credentials from localStorage on page load.
+ * Silently re-submits API key and AIDR token to the backend
+ * so the server-side session is re-hydrated.
+ */
+async function restoreSavedCredentials() {
+    const savedProvider = localStorage.getItem(LS_KEYS.PROVIDER);
+    const savedModel = localStorage.getItem(LS_KEYS.MODEL);
+    const savedPersona = localStorage.getItem(LS_KEYS.PERSONA);
+    const savedOllamaUrl = localStorage.getItem(LS_KEYS.OLLAMA_URL);
+    const savedApiKey = localStorage.getItem(LS_KEYS.API_KEY);
+    const savedAidrToken = localStorage.getItem(LS_KEYS.AIDR_TOKEN);
+    const savedAidrBaseUrl = localStorage.getItem(LS_KEYS.AIDR_BASE_URL);
+
+    // Restore form field values
+    if (savedProvider && providerSelect) {
+        providerSelect.value = savedProvider;
+        onProviderChange();
+    }
+    if (savedOllamaUrl && ollamaUrlInput) {
+        ollamaUrlInput.value = savedOllamaUrl;
+    }
+    if (savedPersona && personaSelect) {
+        personaSelect.value = savedPersona;
+        personaHint.textContent = PERSONA_HINTS[savedPersona] || '';
+        updatePersonaBadge(savedPersona);
+        applyPersonaTheme(savedPersona);
+    }
+    if (savedAidrBaseUrl && aidrBaseUrlInput) {
+        aidrBaseUrlInput.value = savedAidrBaseUrl;
+    }
+
+    // Re-submit API key to the server session if we have one saved
+    if (savedApiKey) {
+        try {
+            const settings = {
+                provider: savedProvider || providerSelect.value,
+                model: savedModel || modelSelect.value,
+                persona: savedPersona || personaSelect.value,
+                ollama_url: savedOllamaUrl || ollamaUrlInput.value,
+                api_key: savedApiKey,
+            };
+            const resp = await fetch('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings),
+            });
+            if (resp.ok) {
+                hasApiKey = true;
+                updateFooterIndicator(settings.provider, settings.model);
+                updatePersonaBadge(settings.persona);
+                console.log('[Credentials] ✅ API key restored from saved data.');
+            }
+        } catch (e) {
+            console.warn('[Credentials] Could not restore API key:', e);
+        }
+    }
+
+    // Restore model selection after fetching models
+    if (savedModel) {
+        await fetchModels();
+        modelSelect.value = savedModel;
+        updateFooterIndicator(
+            savedProvider || providerSelect.value,
+            savedModel
+        );
+    }
+
+    // Re-connect AIDR if we have a saved token
+    if (savedAidrToken) {
+        try {
+            const resp = await fetch('/api/aidr-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    token: savedAidrToken,
+                    base_url: savedAidrBaseUrl || '',
+                }),
+            });
+            const data = await resp.json();
+            if (resp.ok && data.configured) {
+                isAidrConfigured = true;
+                if (aidrConnectBtn) {
+                    aidrConnectBtn.classList.add('connected');
+                    aidrConnectText.textContent = '✓ Connected';
+                }
+                if (aidrConnectStatus) {
+                    aidrConnectStatus.textContent = 'AIDR restored from saved credentials.';
+                    aidrConnectStatus.className = 'aidr-connect-status success';
+                }
+                aidrBadge.classList.remove('aidr-disabled');
+                aidrBadge.setAttribute('aria-pressed', 'true');
+                if (aidrText) aidrText.textContent = 'AIDR Protected';
+                isAidrEnabled = true;
+                console.log('[Credentials] ✅ AIDR token restored from saved data.');
+            }
+        } catch (e) {
+            console.warn('[Credentials] Could not restore AIDR token:', e);
+        }
+    }
+
+    // Update banners after restoration
+    updateSetupBanner();
+}
+
+/**
+ * Clear all saved credentials from localStorage.
+ */
+function forgetSavedCredentials() {
+    Object.values(LS_KEYS).forEach(key => localStorage.removeItem(key));
+    hasApiKey = false;
+    isAidrConfigured = false;
+
+    // Reset form fields
+    if (apiKeyInput) apiKeyInput.value = '';
+    if (aidrTokenInput) aidrTokenInput.value = '';
+    if (aidrBaseUrlInput) aidrBaseUrlInput.value = 'https://api.us-2.crowdstrike.com/aidr/aiguard';
+
+    // Reset AIDR button state
+    if (aidrConnectBtn) {
+        aidrConnectBtn.classList.remove('connected');
+        aidrConnectText.textContent = 'Connect AIDR';
+    }
+    if (aidrConnectStatus) {
+        aidrConnectStatus.textContent = 'Saved credentials have been cleared.';
+        aidrConnectStatus.className = 'aidr-connect-status';
+    }
+
+    updateSetupBanner();
+    console.log('[Credentials] 🗑️ All saved credentials cleared.');
+}
+
+/**
+ * Check if any credentials are currently saved in localStorage.
+ */
+function hasSavedCredentials() {
+    return !!(localStorage.getItem(LS_KEYS.API_KEY) || localStorage.getItem(LS_KEYS.AIDR_TOKEN));
 }
 
 // ============================================================
