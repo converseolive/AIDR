@@ -1,0 +1,8 @@
+## 2025-03-10 - SSRF Vulnerability in User-Configurable URLs
+**Vulnerability:** The application accepted user-provided URLs (`base_url` for AIDR client configuration and `ollama_url` for settings) without any validation, allowing for Server-Side Request Forgery (SSRF). Attackers could potentially reach internal services, metadata services, or loopback interfaces.
+**Learning:** Even internal-facing configuration settings that accept URLs can be abused if the application makes subsequent network requests using those inputs (e.g. LLM model API calls, AIDR client). Relying solely on standard python HTTP libraries without custom hostname resolution and filtering is dangerous. DNS Rebinding (TOCTOU) and alternative protocol attacks must be explicitly mitigated.
+**Prevention:**
+1. Explicitly check the parsed scheme is strictly 'http' or 'https'.
+2. Use `socket.getaddrinfo(hostname, None)` to parse both IPv4 and IPv6 addresses. Note that while this filters basic SSRF payloads, it DOES NOT fully mitigate DNS Rebinding (TOCTOU) because the unparsed hostname is passed to the underlying HTTP client which will resolve it a second time. Fully mitigating TOCTOU requires a custom HTTP adapter.
+3. Block `is_unspecified` (e.g. `0.0.0.0`), `is_multicast`, and AWS metadata IPs (`169.254.169.254`, `fd00:ec2::254`). Conditionally block `is_private` and `is_loopback` based on whether internal service access is a legitimate use case (e.g. Ollama vs public API).
+4. Do not use `socket.setdefaulttimeout()` during URL validation. Use localized timeouts with `ThreadPoolExecutor` and ensure threads are properly shutdown (`executor.shutdown(wait=False, cancel_futures=True)`) to prevent thread leaks and DoS.
