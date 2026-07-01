@@ -4,3 +4,24 @@ __pycache__/
 venv/
 .venv/
 chat_history.json
+
+# Media / screenshots
+*.png
+*.webp
+*.jpg
+*.jpeg
+*.gif
+
+# Gemini agent artifacts
+task.md
+task.md.*
+walkthrough.md
+walkthrough.md.*
+implementation_plan.md
+implementation_plan.md.*
+
+# Browser recordings
+browser/
+
+# OS files
+.DS_Store

@@ -127,7 +127,8 @@ const WELCOME_CARDS = {
 document.addEventListener('DOMContentLoaded', async () => {
     // Initialize Theme
     const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'light') {
+    const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+    if (savedTheme === 'light' || (!savedTheme && prefersLight)) {
         document.body.classList.add('light-mode');
     }
     updateThemeIcons();

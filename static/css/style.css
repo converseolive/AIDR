@@ -95,6 +95,11 @@ html, body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+/* --- Utility --- */
+.hidden {
+    display: none !important;
+}
+
 /* --- Scrollbar --- */
 ::-webkit-scrollbar {
     width: 6px;
@@ -1765,6 +1770,32 @@ body[data-persona="customer_support"] .persona-badge {
 body[data-persona="customer_support"] .text-secondary,
 body[data-persona="customer_support"] .settings-section-title svg {
     color: #f59e0b;
+}
+
+/* ============================================================
+   Light Mode Overrides
+   Fixes for elements with hardcoded dark-theme colors.
+   ============================================================ */
+body.light-mode .message.user .chat-attachment-card {
+    background: rgba(0, 0, 0, 0.04);
+    border-color: rgba(0, 0, 0, 0.15);
+}
+
+body.light-mode .message.user .chat-attachment-icon {
+    background: rgba(0, 0, 0, 0.06);
+    color: #374151;
+}
+
+body.light-mode .chat-list-action-btn:hover {
+    background: rgba(0, 0, 0, 0.08);
+}
+
+body.light-mode .upload-progress-bar {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+body.light-mode .chat-list-item-title[contenteditable="true"] {
+    background: rgba(0, 0, 0, 0.05);
 }
 
 /* Smooth theme transition for key elements */

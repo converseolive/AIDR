@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "aidr-chatbot",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "flask", "--app", "app", "run", "--port", "5050"],
+      "port": 5050,
+      "autoPort": false
+    }
+  ]
+}
