@@ -7,6 +7,11 @@ import os
 import json
 import uuid
 import traceback
+import urllib.parse
+import socket
+import ipaddress
+import sys
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
@@ -14,6 +19,76 @@ from dotenv import load_dotenv
 load_dotenv()
 
 app = Flask(__name__)
+
+def is_safe_url(url, allow_local=False):
+    """
+    Validates a URL to prevent Server-Side Request Forgery (SSRF).
+    - Ensures scheme is strictly HTTP or HTTPS.
+    - Resolves the hostname (supporting both IPv4 and IPv6).
+    - Blocks metadata, multicast, and unspecified IPs.
+    - Conditionally blocks loopback and private IPs based on allow_local.
+    - Uses ThreadPoolExecutor for localized timeout to prevent thread leaks/DoS.
+    """
+    if not url:
+        return True # Allow empty/none URLs as they might be optional
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme.lower() not in ('http', 'https'):
+            print(f"[SECURITY] ⚠️  Blocked URL with invalid scheme: {parsed.scheme}")
+            return False
+
+        hostname = parsed.hostname
+        if not hostname:
+             return False
+
+        # Use ThreadPoolExecutor for DNS resolution to implement localized timeout
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+             # getaddrinfo handles both IPv4 and IPv6
+             future = executor.submit(socket.getaddrinfo, hostname, None)
+             addrinfo = future.result(timeout=5)
+        except TimeoutError:
+             print(f"[SECURITY] ⚠️  DNS resolution timed out for {hostname}")
+             return False
+        except Exception as e:
+             print(f"[SECURITY] ⚠️  DNS resolution failed for {hostname}: {e}")
+             return False
+        finally:
+             if sys.version_info >= (3, 9):
+                  executor.shutdown(wait=False, cancel_futures=True)
+             else:
+                  executor.shutdown(wait=False)
+
+        # addrinfo is a list of tuples: (family, type, proto, canonname, sockaddr)
+        for res in addrinfo:
+             # Extract the IP address from the sockaddr tuple
+             ip_str = res[4][0]
+             try:
+                 ip = ipaddress.ip_address(ip_str)
+
+                 # Explicitly check is_unspecified as it bypasses private/loopback checks
+                 if ip.is_unspecified:
+                      print(f"[SECURITY] ⚠️  Blocked unspecified IP address: {ip}")
+                      return False
+
+                 if ip.is_multicast or ip.is_link_local:
+                      print(f"[SECURITY] ⚠️  Blocked unsafe IP address: {ip}")
+                      return False
+
+                 if not allow_local and (ip.is_loopback or ip.is_private):
+                      print(f"[SECURITY] ⚠️  Blocked local/private IP address: {ip}")
+                      return False
+
+             except ValueError:
+                 print(f"[SECURITY] ⚠️  Invalid IP address returned from DNS: {ip_str}")
+                 return False
+
+        return True
+
+    except Exception as e:
+        print(f"[SECURITY] ⚠️  URL validation error: {e}")
+        return False
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
 
 # ---------------------------------------------------------------------------
@@ -30,9 +105,15 @@ def init_aidr():
         aidr_client = None
         return
     try:
+        base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
+        if not is_safe_url(base_url, allow_local=False):
+             print(f"[AIDR] ⚠️  Blocked unsafe AIDR_BASE_URL: {base_url}")
+             aidr_client = None
+             return
+
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
-            base_url_template=os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard"),
+            base_url_template=base_url,
             token=token,
         )
         print("[AIDR] ✅ AIGuard client initialized successfully.")
@@ -435,6 +516,9 @@ def aidr_config():
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
+    if not is_safe_url(base_url, allow_local=False):
+        return jsonify({"error": "Invalid or unsafe AIDR base URL provided."}), 400
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
@@ -476,6 +560,8 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
+        if not is_safe_url(data["ollama_url"], allow_local=True):
+             return jsonify({"error": "Invalid or unsafe Ollama URL provided."}), 400
         session["ollama_url"] = data["ollama_url"]
 
     # Clear active chat's messages when settings change
