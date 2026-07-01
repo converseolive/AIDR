@@ -1008,6 +1008,15 @@ body[data-persona="customer_support"] .new-chat-btn:hover {
     animation: pulse-dot 2s ease-in-out infinite;
 }
 
+.aidr-indicator.aidr-off {
+    color: var(--danger);
+}
+
+.aidr-indicator.aidr-off .aidr-dot {
+    background: var(--danger);
+    animation: none;
+}
+
 @keyframes pulse-dot {
     0%, 100% {
         opacity: 1;

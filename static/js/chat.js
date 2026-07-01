@@ -246,14 +246,20 @@ function setupEventListeners() {
     if (aidrBadge) {
         aidrBadge.addEventListener('click', () => {
             isAidrEnabled = !isAidrEnabled;
+            const aidrIndicator = document.getElementById('aidrIndicator');
+            const aidrIndicatorText = document.getElementById('aidrIndicatorText');
             if (isAidrEnabled) {
                 aidrBadge.classList.remove('aidr-disabled');
                 aidrBadge.setAttribute('aria-pressed', 'true');
                 if (aidrText) aidrText.textContent = 'AIDR Protected';
+                if (aidrIndicator) aidrIndicator.classList.remove('aidr-off');
+                if (aidrIndicatorText) aidrIndicatorText.textContent = 'AIDR Active';
             } else {
                 aidrBadge.classList.add('aidr-disabled');
                 aidrBadge.setAttribute('aria-pressed', 'false');
                 if (aidrText) aidrText.textContent = 'AIDR Disabled';
+                if (aidrIndicator) aidrIndicator.classList.add('aidr-off');
+                if (aidrIndicatorText) aidrIndicatorText.textContent = 'AIDR Inactive';
             }
         });
     }
