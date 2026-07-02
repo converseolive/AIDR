@@ -338,7 +338,14 @@ def index():
 def list_chats():
     """Return all chat sessions (metadata only, no messages)."""
     chats = []
+    current_session_id = session.get("session_id")
     for cid, s in chat_sessions.items():
+        # Check authorization: only return chats that match the user's session_id
+        # (or lack one for backward compatibility).
+        chat_session_id = s.get("session_id")
+        if chat_session_id and chat_session_id != current_session_id:
+            continue
+
         chats.append({
             "id": cid,
             "title": s.get("title", "New Chat"),
@@ -369,6 +376,7 @@ def create_chat():
         "aidr_block_count": 0,
         "created_at": now,
         "updated_at": now,
+        "session_id": session.get("session_id"),
     }
     # Set as active chat
     session["active_chat_id"] = chat_id
@@ -382,6 +390,9 @@ def get_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    chat_session_id = s.get("session_id")
+    if chat_session_id and chat_session_id != session.get("session_id"):
+        return jsonify({"error": "Forbidden: You do not have access to this chat"}), 403
     session["active_chat_id"] = chat_id
     return jsonify(s)
 
@@ -390,6 +401,10 @@ def get_chat(chat_id):
 def delete_chat(chat_id):
     """Delete a chat session."""
     if chat_id in chat_sessions:
+        s = chat_sessions[chat_id]
+        chat_session_id = s.get("session_id")
+        if chat_session_id and chat_session_id != session.get("session_id"):
+            return jsonify({"error": "Forbidden: You do not have access to this chat"}), 403
         del chat_sessions[chat_id]
         _save_chat_sessions()
         # If this was the active chat, clear it
@@ -404,6 +419,9 @@ def rename_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    chat_session_id = s.get("session_id")
+    if chat_session_id and chat_session_id != session.get("session_id"):
+        return jsonify({"error": "Forbidden: You do not have access to this chat"}), 403
     data = request.json or {}
     new_title = data.get("title", "").strip()
     if not new_title:
@@ -594,9 +612,13 @@ def chat():
             "aidr_block_count": 0,
             "created_at": now,
             "updated_at": now,
+            "session_id": session.get("session_id"),
         }
 
     chat_session = chat_sessions[chat_id]
+    chat_session_id = chat_session.get("session_id")
+    if chat_session_id and chat_session_id != session.get("session_id"):
+        return jsonify({"error": "Forbidden: You do not have access to this chat"}), 403
     history = chat_session["messages"]
 
     # Build messages with persona system prompt
@@ -707,6 +729,10 @@ def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
     if chat_id and chat_id in chat_sessions:
+        s = chat_sessions[chat_id]
+        chat_session_id = s.get("session_id")
+        if chat_session_id and chat_session_id != session.get("session_id"):
+            return jsonify({"error": "Forbidden: You do not have access to this chat"}), 403
         chat_sessions[chat_id]["messages"] = []
         _save_chat_sessions()
     return jsonify({"status": "ok"})
