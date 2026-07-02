@@ -464,6 +464,16 @@ body[data-persona="customer_support"] .new-chat-btn:hover {
     border-color: var(--border-medium);
 }
 
+#themeToggleBtn {
+    color: var(--accent-primary);
+    border-color: var(--border-medium);
+}
+
+#themeToggleBtn:hover {
+    background: var(--surface-1);
+    box-shadow: 0 0 8px var(--accent-glow);
+}
+
 /* ============================================================
    Messages Area
    ============================================================ */
