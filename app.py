@@ -7,11 +7,59 @@ import os
 import json
 import uuid
 import traceback
+import urllib.parse
+import socket
+import ipaddress
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
 
 load_dotenv()
+
+def is_safe_url(url, allow_local=False):
+    """
+    Validates user-provided URLs to prevent Server-Side Request Forgery (SSRF).
+    - Ensures scheme is strictly http or https.
+    - Resolves hostname to check actual IPs (filters basic payloads, though TOCTOU
+      requires a custom HTTP adapter for full mitigation).
+    - Explicitly blocks unspecified (0.0.0.0/::), multicast, and link-local addresses.
+    - Conditionally blocks private/loopback addresses.
+    - Uses ThreadPoolExecutor for localized DNS timeouts to avoid thread leaks.
+    """
+    if not url:
+        return True
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    if not parsed.hostname:
+        return False
+
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        res = executor.submit(socket.getaddrinfo, parsed.hostname, None).result(timeout=2)
+    except Exception:
+        return False
+    finally:
+        if sys.version_info >= (3, 9):
+            executor.shutdown(wait=False, cancel_futures=True)
+        else:
+            executor.shutdown(wait=False)
+
+    for r in res:
+        try:
+            ip = ipaddress.ip_address(r[4][0])
+            if ip.is_multicast or ip.is_unspecified or ip.is_link_local:
+                return False
+            if not allow_local and (ip.is_private or ip.is_loopback):
+                return False
+        except ValueError:
+            pass
+
+    return True
 
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
@@ -25,14 +73,23 @@ def init_aidr():
     """Initialize the CrowdStrike AIDR client."""
     global aidr_client
     token = os.getenv("AIDR_TOKEN", "").strip()
+    base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
+
     if not token:
         print("[AIDR] ⚠️  No AIDR token configured. Enter one via Settings in the UI.")
         aidr_client = None
         return
+
+    # Security: Prevent SSRF by validating the configurable base URL
+    if not is_safe_url(base_url, allow_local=False):
+        print(f"[AIDR] ⚠️  Security warning: AIDR_BASE_URL '{base_url}' is not a safe URL. Disabling AIDR.")
+        aidr_client = None
+        return
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
-            base_url_template=os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard"),
+            base_url_template=base_url,
             token=token,
         )
         print("[AIDR] ✅ AIGuard client initialized successfully.")
@@ -435,6 +492,10 @@ def aidr_config():
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
+    # Security: Prevent SSRF
+    if not is_safe_url(base_url, allow_local=False):
+        return jsonify({"error": "Invalid or unsafe AIDR base URL."}), 400
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
@@ -476,7 +537,11 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
-        session["ollama_url"] = data["ollama_url"]
+        # Security: Prevent SSRF but allow local URLs for Ollama
+        ollama_url = data["ollama_url"].strip()
+        if not is_safe_url(ollama_url, allow_local=True):
+            return jsonify({"error": "Invalid or unsafe Ollama URL."}), 400
+        session["ollama_url"] = ollama_url
 
     # Clear active chat's messages when settings change
     active_chat_id = session.get("active_chat_id", "")
