@@ -1,0 +1,4 @@
+## 2024-07-06 - Insecure Direct Object Reference (IDOR) in Chat Management
+**Vulnerability:** Chat sessions were stored in a global dictionary (`chat_sessions`) without associating them with a specific user or session ID. The API endpoints (`/api/chats`, `/api/chats/<chat_id>`, etc.) did not verify if the requesting user owned the chat before returning, modifying, or deleting it, allowing any user to access or alter any chat.
+**Learning:** Global state or shared stores must always include tenant or user identifiers, and every endpoint accessing this state must authorize the request against that identifier.
+**Prevention:** Ensure that objects created by users include an ownership identifier (like `session_id`) and that all CRUD operations explicitly verify `object.owner_id == request.user_id` before processing the request.
