@@ -1,0 +1,9 @@
+## 2024-07-02 - [CRITICAL] Fix SSRF vulnerability in user-configurable URLs
+**Vulnerability:** Server-Side Request Forgery (SSRF). The application accepted user-configurable URLs (`AIDR_BASE_URL` and `ollama_url`) via `init_aidr`, `/api/aidr-config`, and `/api/settings` without validation. Attackers could set these to internal, private, metadata, or multicast IP addresses, enabling them to scan internal networks, access cloud metadata services (e.g., AWS IMDS via `169.254.169.254`), or perform requests on behalf of the server.
+**Learning:** Security validation must distinguish between expected remote requests and explicitly permitted local requests. For instance, `AIDR_BASE_URL` must strictly block local/private IPs, whereas `ollama_url` legitimately requires local access but must still block highly privileged or metadata IPs (`is_unspecified`, `is_multicast`, `is_link_local`). Furthermore, unspecified IPs (`0.0.0.0` or `::`) bypass `is_private` and `is_loopback` checks but can route locally, so they must be explicitly blocked.
+**Prevention:**
+1. Always validate schemes to strictly allow only 'http' and 'https' to prevent alternative protocol attacks (e.g., `file://`, `gopher://`).
+2. Resolve hostnames (supporting both IPv4 and IPv6) and explicitly validate the underlying IP addresses using `ipaddress`.
+3. Explicitly check for and block `is_unspecified`, `is_multicast`, and `is_link_local` IPs.
+4. Conditionally block `is_private` and `is_loopback` IPs based on the specific required access level of the configuration parameter.
+5. Use localized timeouts (e.g., `ThreadPoolExecutor`) and ensure futures are explicitly cancelled in `finally` blocks to prevent thread leaks and Denial-of-Service when resolving untrusted input.
