@@ -99,6 +99,69 @@ PERSONAS = {
 }
 
 # ---------------------------------------------------------------------------
+# Security Helpers
+# ---------------------------------------------------------------------------
+import socket
+import ipaddress
+import sys
+from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+def is_safe_url(url, allow_private=False, timeout=3.0):
+    if not url:
+        return True
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        def resolve_host():
+            return socket.getaddrinfo(hostname, None)
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(resolve_host)
+
+        try:
+            addr_infos = future.result(timeout=timeout)
+        except TimeoutError:
+            if sys.version_info >= (3, 9):
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=False)
+            return False
+        except Exception:
+            if sys.version_info >= (3, 9):
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=False)
+            return False
+        else:
+            if sys.version_info >= (3, 9):
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=False)
+
+        ips = [info[4][0] for info in addr_infos]
+
+        for ip_str in ips:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_unspecified or ip.is_multicast:
+                return False
+            # Block metadata IPs
+            if str(ip).startswith('169.254.') or str(ip).startswith('fd00:ec2::'):
+                return False
+
+            if not allow_private and (ip.is_private or ip.is_loopback):
+                return False
+
+        return True
+    except Exception:
+        return False
+
+# ---------------------------------------------------------------------------
 # Default model lists per provider
 # ---------------------------------------------------------------------------
 DEFAULT_MODELS = {
@@ -435,6 +498,9 @@ def aidr_config():
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
+    if not is_safe_url(base_url, allow_private=False):
+        return jsonify({"error": "Invalid or unsafe AIDR base URL."}), 400
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
@@ -476,7 +542,10 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
-        session["ollama_url"] = data["ollama_url"]
+        ollama_url = data["ollama_url"]
+        if not is_safe_url(ollama_url, allow_private=True):
+            return jsonify({"error": "Invalid or unsafe Ollama URL."}), 400
+        session["ollama_url"] = ollama_url
 
     # Clear active chat's messages when settings change
     active_chat_id = session.get("active_chat_id", "")
