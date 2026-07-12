@@ -1,0 +1,4 @@
+## 2024-07-12 - [Insecure Direct Object Reference (IDOR) in Chat Endpoints]
+**Vulnerability:** A critical authorization bypass existed where any user could access, rename, or delete another user's chat if they guessed the `chat_id`. The application lacked explicit authorization checks across state-mutating and data-retrieval chat endpoints.
+**Learning:** Initializing the `session_id` within specific route handlers like `index()` rather than a globally applied `before_request` hook can lead to scenarios where direct API access leaves the session uninitialized (`None`), thereby bypassing authorization checks on models without explicit owners.
+**Prevention:** Track user identity securely via `session_id` globally and mandate continuous verification across all state-mutating and data-retrieval endpoints to prevent unauthorized access.
