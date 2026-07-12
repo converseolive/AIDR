@@ -1792,6 +1792,222 @@ body[data-persona="customer_support"] .settings-section-title svg {
 }
 
 /* ============================================================
+   Persona Theme: Banking Assistant (emerald/gold)
+   ============================================================ */
+body[data-persona="banking"] {
+    --accent-primary: #10b981;
+    --accent-gradient: linear-gradient(135deg, #10b981 0%, #eab308 100%);
+    --accent-glow: rgba(16, 185, 129, 0.4);
+    --border-subtle: rgba(16, 185, 129, 0.12);
+    --border-medium: rgba(16, 185, 129, 0.25);
+    --user-bubble: rgba(16, 185, 129, 0.08);
+    --assistant-bubble: rgba(234, 179, 8, 0.05);
+    --shadow-sm: 0 0 10px rgba(16, 185, 129, 0.2);
+    --shadow-md: 0 0 20px rgba(16, 185, 129, 0.4);
+}
+
+body[data-persona="banking"] .orb-1 {
+    background: radial-gradient(circle, rgba(16,185,129,0.45) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="banking"] .orb-2 {
+    background: radial-gradient(circle, rgba(234,179,8,0.35) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="banking"] .orb-3 {
+    background: radial-gradient(circle, rgba(52,211,153,0.25) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="banking"] .orb-4 {
+    background: radial-gradient(circle, rgba(16,185,129,0.12) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="banking"] .message.user .message-content {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.15);
+}
+
+body[data-persona="banking"] .message.assistant .message-content {
+    border-color: #eab308;
+    box-shadow: 0 0 10px rgba(234, 179, 8, 0.15);
+}
+
+body[data-persona="banking"] .send-btn {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    box-shadow: inset 0 0 8px rgba(16, 185, 129, 0.2), 0 0 8px rgba(16, 185, 129, 0.3);
+}
+
+body[data-persona="banking"] .send-btn:hover:not(:disabled) {
+    background: var(--accent-primary);
+    color: #000;
+    box-shadow: 0 0 16px rgba(16, 185, 129, 0.5);
+}
+
+body[data-persona="banking"] .chat-container {
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(16, 185, 129, 0.02),
+        rgba(16, 185, 129, 0.02) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+}
+
+body[data-persona="banking"] .persona-badge {
+    color: #10b981;
+}
+
+body[data-persona="banking"] .text-secondary,
+body[data-persona="banking"] .settings-section-title svg {
+    color: #10b981;
+}
+
+/* ============================================================
+   Persona Theme: Healthcare Assistant (teal/soft blue)
+   ============================================================ */
+body[data-persona="healthcare"] {
+    --accent-primary: #14b8a6;
+    --accent-gradient: linear-gradient(135deg, #14b8a6 0%, #3b82f6 100%);
+    --accent-glow: rgba(20, 184, 166, 0.4);
+    --border-subtle: rgba(20, 184, 166, 0.12);
+    --border-medium: rgba(20, 184, 166, 0.25);
+    --user-bubble: rgba(20, 184, 166, 0.08);
+    --assistant-bubble: rgba(59, 130, 246, 0.05);
+    --shadow-sm: 0 0 10px rgba(20, 184, 166, 0.2);
+    --shadow-md: 0 0 20px rgba(20, 184, 166, 0.4);
+}
+
+body[data-persona="healthcare"] .orb-1 {
+    background: radial-gradient(circle, rgba(20,184,166,0.45) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="healthcare"] .orb-2 {
+    background: radial-gradient(circle, rgba(59,130,246,0.35) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="healthcare"] .orb-3 {
+    background: radial-gradient(circle, rgba(45,212,191,0.25) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="healthcare"] .orb-4 {
+    background: radial-gradient(circle, rgba(20,184,166,0.12) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="healthcare"] .message.user .message-content {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 10px rgba(20, 184, 166, 0.15);
+}
+
+body[data-persona="healthcare"] .message.assistant .message-content {
+    border-color: #3b82f6;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.15);
+}
+
+body[data-persona="healthcare"] .send-btn {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    box-shadow: inset 0 0 8px rgba(20, 184, 166, 0.2), 0 0 8px rgba(20, 184, 166, 0.3);
+}
+
+body[data-persona="healthcare"] .send-btn:hover:not(:disabled) {
+    background: var(--accent-primary);
+    color: #000;
+    box-shadow: 0 0 16px rgba(20, 184, 166, 0.5);
+}
+
+body[data-persona="healthcare"] .chat-container {
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(20, 184, 166, 0.02),
+        rgba(20, 184, 166, 0.02) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+}
+
+body[data-persona="healthcare"] .persona-badge {
+    color: #14b8a6;
+}
+
+body[data-persona="healthcare"] .text-secondary,
+body[data-persona="healthcare"] .settings-section-title svg {
+    color: #14b8a6;
+}
+
+/* ============================================================
+   Persona Theme: Education Assistant (violet/indigo)
+   ============================================================ */
+body[data-persona="education"] {
+    --accent-primary: #8b5cf6;
+    --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+    --accent-glow: rgba(139, 92, 246, 0.4);
+    --border-subtle: rgba(139, 92, 246, 0.12);
+    --border-medium: rgba(139, 92, 246, 0.25);
+    --user-bubble: rgba(139, 92, 246, 0.08);
+    --assistant-bubble: rgba(99, 102, 241, 0.05);
+    --shadow-sm: 0 0 10px rgba(139, 92, 246, 0.2);
+    --shadow-md: 0 0 20px rgba(139, 92, 246, 0.4);
+}
+
+body[data-persona="education"] .orb-1 {
+    background: radial-gradient(circle, rgba(139,92,246,0.45) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="education"] .orb-2 {
+    background: radial-gradient(circle, rgba(99,102,241,0.35) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="education"] .orb-3 {
+    background: radial-gradient(circle, rgba(167,139,250,0.25) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="education"] .orb-4 {
+    background: radial-gradient(circle, rgba(139,92,246,0.12) 0%, rgba(0,0,0,0) 70%);
+}
+
+body[data-persona="education"] .message.user .message-content {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.15);
+}
+
+body[data-persona="education"] .message.assistant .message-content {
+    border-color: #6366f1;
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.15);
+}
+
+body[data-persona="education"] .send-btn {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    box-shadow: inset 0 0 8px rgba(139, 92, 246, 0.2), 0 0 8px rgba(139, 92, 246, 0.3);
+}
+
+body[data-persona="education"] .send-btn:hover:not(:disabled) {
+    background: var(--accent-primary);
+    color: #000;
+    box-shadow: 0 0 16px rgba(139, 92, 246, 0.5);
+}
+
+body[data-persona="education"] .chat-container {
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(139, 92, 246, 0.02),
+        rgba(139, 92, 246, 0.02) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+}
+
+body[data-persona="education"] .persona-badge {
+    color: #8b5cf6;
+}
+
+body[data-persona="education"] .text-secondary,
+body[data-persona="education"] .settings-section-title svg {
+    color: #8b5cf6;
+}
+
+/* ============================================================
    Light Mode Overrides
    Fixes for elements with hardcoded dark-theme colors.
    ============================================================ */

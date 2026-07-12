@@ -90,13 +90,19 @@ const LS_KEYS = {
 };
 
 const PERSONA_HINTS = {
-    customer_support: 'Friendly and professional support agent.',
-    security_qa: 'Cybersecurity expert for threat and compliance Q&A.',
+    customer_support: 'Aria — Nimbus support for orders, billing, and troubleshooting.',
+    security_qa: 'Sentinel — security analyst for threat and compliance Q&A.',
+    banking: 'Penny — Meridian Bank assistant for accounts, cards, and payments.',
+    healthcare: 'Ivy — Lakeside Health assistant for appointments and patient services.',
+    education: 'Sage — Brightpath Academy tutor for homework and study help.',
 };
 
 const PERSONA_BADGES = {
     customer_support: '🎧 Customer Support',
     security_qa: '🛡️ Security Q&A',
+    banking: '🏦 Banking Assistant',
+    healthcare: '🩺 Healthcare Assistant',
+    education: '🎓 Education Assistant',
 };
 
 const PROVIDER_NAMES = {
@@ -118,6 +124,24 @@ const WELCOME_CARDS = {
         { icon: '🛡️', text: 'Improve security posture', prompt: 'How can I improve my organization\'s security posture?' },
         { icon: '🚨', text: 'Incident response', prompt: 'Can you help me understand incident response procedures?' },
         { icon: '📋', text: 'Compliance frameworks', prompt: 'What compliance frameworks should my business follow?' },
+    ],
+    banking: [
+        { icon: '💳', text: 'Report a lost card', prompt: 'I think I lost my debit card. What should I do right now?' },
+        { icon: '🏠', text: 'Mortgage basics', prompt: 'Can you explain how a fixed-rate mortgage works?' },
+        { icon: '💸', text: 'Set up a transfer', prompt: 'How do I set up a recurring transfer to my savings account?' },
+        { icon: '🔔', text: 'Spot a scam', prompt: 'How can I tell if a text message claiming to be from my bank is a phishing scam?' },
+    ],
+    healthcare: [
+        { icon: '📅', text: 'Prepare for a visit', prompt: 'How should I prepare for my upcoming appointment?' },
+        { icon: '💊', text: 'Prescription refills', prompt: 'How does the prescription refill process work?' },
+        { icon: '🧾', text: 'Insurance terms', prompt: 'What is the difference between a deductible and a copay?' },
+        { icon: '🌿', text: 'Wellness tips', prompt: 'What are some everyday habits that support good health?' },
+    ],
+    education: [
+        { icon: '🔬', text: 'Explain a concept', prompt: 'Can you explain how photosynthesis works?' },
+        { icon: '📆', text: 'Build a study plan', prompt: 'Can you help me build a study plan for my upcoming exams?' },
+        { icon: '📝', text: 'Practice questions', prompt: 'Can you quiz me with some practice questions on algebra?' },
+        { icon: '✍️', text: 'Essay feedback', prompt: 'Can you give me feedback on my essay outline?' },
     ],
 };
 
@@ -1234,9 +1258,11 @@ async function createNewChat() {
         
         activeChatId = data.id;
         chatMessages.innerHTML = '';
-        
-        // Show welcome screen
-        const currentPersona = document.body.dataset.persona || 'customer_support';
+
+        // Show welcome screen using the persona the new chat was created with
+        const currentPersona = data.persona || document.body.dataset.persona || 'customer_support';
+        updatePersonaBadge(currentPersona);
+        applyPersonaTheme(currentPersona);
         const welcome = document.createElement('div');
         welcome.className = 'welcome-screen';
         welcome.id = 'welcomeScreen';
