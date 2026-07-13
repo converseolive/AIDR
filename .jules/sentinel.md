@@ -1,0 +1,4 @@
+## 2024-07-13 - [Global State IDOR & Uninitialized Sessions]
+**Vulnerability:** Missing authorization (IDOR) on chat endpoints and uninitialized user sessions. Any user could access, rename, or delete any other user's chats by ID.
+**Learning:** The application tracks user identity via a `session_id` in the Flask session, but previously only initialized it in the `index()` route. Direct API access bypassed session initialization, and the global `chat_sessions` dictionary was accessed without validating that the requester's `session_id` matched the chat's creator.
+**Prevention:** Always initialize core user identifiers using a global `@app.before_request` hook rather than route-specific logic. In state-mutating and data-retrieval endpoints, explicitly verify ownership (e.g., `chat_session.get("session_id") == session.get("session_id")`) when fetching items from global or persistent stores.
