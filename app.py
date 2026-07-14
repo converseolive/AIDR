@@ -323,11 +323,15 @@ def call_llm(messages, settings):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.before_request
+def ensure_session_id():
+    """Ensure every request has a session_id for security (prevents IDOR bypass)."""
+    if "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+
 @app.route("/")
 def index():
     """Serve the chat page."""
-    if "session_id" not in session:
-        session["session_id"] = str(uuid.uuid4())
     return render_template("index.html")
 
 
@@ -338,7 +342,10 @@ def index():
 def list_chats():
     """Return all chat sessions (metadata only, no messages)."""
     chats = []
+    current_user_id = session.get("session_id")
     for cid, s in chat_sessions.items():
+        if s.get("session_id") != current_user_id:
+            continue
         chats.append({
             "id": cid,
             "title": s.get("title", "New Chat"),
@@ -362,6 +369,7 @@ def create_chat():
     persona_key = session.get("persona", "customer_support")
     chat_sessions[chat_id] = {
         "id": chat_id,
+        "session_id": session.get("session_id"),
         "title": "New Chat",
         "messages": [],
         "persona": persona_key,
@@ -380,7 +388,7 @@ def create_chat():
 def get_chat(chat_id):
     """Load a specific chat session with full messages."""
     s = chat_sessions.get(chat_id)
-    if not s:
+    if not s or s.get("session_id") != session.get("session_id"):
         return jsonify({"error": "Chat not found"}), 404
     session["active_chat_id"] = chat_id
     return jsonify(s)
@@ -390,6 +398,8 @@ def get_chat(chat_id):
 def delete_chat(chat_id):
     """Delete a chat session."""
     if chat_id in chat_sessions:
+        if chat_sessions[chat_id].get("session_id") != session.get("session_id"):
+            return jsonify({"error": "Unauthorized"}), 403
         del chat_sessions[chat_id]
         _save_chat_sessions()
         # If this was the active chat, clear it
@@ -402,7 +412,7 @@ def delete_chat(chat_id):
 def rename_chat(chat_id):
     """Rename a chat session."""
     s = chat_sessions.get(chat_id)
-    if not s:
+    if not s or s.get("session_id") != session.get("session_id"):
         return jsonify({"error": "Chat not found"}), 404
     data = request.json or {}
     new_title = data.get("title", "").strip()
@@ -481,8 +491,9 @@ def save_settings():
     # Clear active chat's messages when settings change
     active_chat_id = session.get("active_chat_id", "")
     if active_chat_id and active_chat_id in chat_sessions:
-        chat_sessions[active_chat_id]["messages"] = []
-        _save_chat_sessions()
+        if chat_sessions[active_chat_id].get("session_id") == session.get("session_id"):
+            chat_sessions[active_chat_id]["messages"] = []
+            _save_chat_sessions()
 
     return jsonify({"status": "ok"})
 
@@ -587,6 +598,7 @@ def chat():
         now = datetime.now(timezone.utc).isoformat()
         chat_sessions[chat_id] = {
             "id": chat_id,
+            "session_id": session.get("session_id"),
             "title": "New Chat",
             "messages": [],
             "persona": persona_key,
@@ -597,6 +609,8 @@ def chat():
         }
 
     chat_session = chat_sessions[chat_id]
+    if chat_session.get("session_id") and chat_session.get("session_id") != session.get("session_id"):
+        return jsonify({"error": "Unauthorized"}), 403
     history = chat_session["messages"]
 
     # Build messages with persona system prompt
@@ -707,6 +721,8 @@ def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
     if chat_id and chat_id in chat_sessions:
+        if chat_sessions[chat_id].get("session_id") != session.get("session_id"):
+            return jsonify({"error": "Unauthorized"}), 403
         chat_sessions[chat_id]["messages"] = []
         _save_chat_sessions()
     return jsonify({"status": "ok"})
