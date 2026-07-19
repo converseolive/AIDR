@@ -338,7 +338,10 @@ def index():
 def list_chats():
     """Return all chat sessions (metadata only, no messages)."""
     chats = []
+    user_id = session.get("session_id")
     for cid, s in chat_sessions.items():
+        if s.get("user_id") and s.get("user_id") != user_id:
+            continue
         chats.append({
             "id": cid,
             "title": s.get("title", "New Chat"),
@@ -362,6 +365,7 @@ def create_chat():
     persona_key = session.get("persona", "customer_support")
     chat_sessions[chat_id] = {
         "id": chat_id,
+        "user_id": session.get("session_id"),
         "title": "New Chat",
         "messages": [],
         "persona": persona_key,
@@ -382,6 +386,8 @@ def get_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    if s.get("user_id") and s.get("user_id") != session.get("session_id"):
+        return jsonify({"error": "Forbidden"}), 403
     session["active_chat_id"] = chat_id
     return jsonify(s)
 
@@ -390,6 +396,8 @@ def get_chat(chat_id):
 def delete_chat(chat_id):
     """Delete a chat session."""
     if chat_id in chat_sessions:
+        if chat_sessions[chat_id].get("user_id") and chat_sessions[chat_id].get("user_id") != session.get("session_id"):
+            return jsonify({"error": "Forbidden"}), 403
         del chat_sessions[chat_id]
         _save_chat_sessions()
         # If this was the active chat, clear it
@@ -404,6 +412,8 @@ def rename_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    if s.get("user_id") and s.get("user_id") != session.get("session_id"):
+        return jsonify({"error": "Forbidden"}), 403
     data = request.json or {}
     new_title = data.get("title", "").strip()
     if not new_title:
@@ -587,6 +597,7 @@ def chat():
         now = datetime.now(timezone.utc).isoformat()
         chat_sessions[chat_id] = {
             "id": chat_id,
+            "user_id": session.get("session_id"),
             "title": "New Chat",
             "messages": [],
             "persona": persona_key,
@@ -597,6 +608,9 @@ def chat():
         }
 
     chat_session = chat_sessions[chat_id]
+    if chat_session.get("user_id") and chat_session.get("user_id") != session.get("session_id"):
+        return jsonify({"error": "Forbidden"}), 403
+
     history = chat_session["messages"]
 
     # Build messages with persona system prompt
@@ -707,6 +721,8 @@ def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
     if chat_id and chat_id in chat_sessions:
+        if chat_sessions[chat_id].get("user_id") and chat_sessions[chat_id].get("user_id") != session.get("session_id"):
+            return jsonify({"error": "Forbidden"}), 403
         chat_sessions[chat_id]["messages"] = []
         _save_chat_sessions()
     return jsonify({"status": "ok"})
