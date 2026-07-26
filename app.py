@@ -7,6 +7,11 @@ import os
 import json
 import uuid
 import traceback
+import urllib.parse
+import ipaddress
+import socket
+import sys
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
@@ -435,6 +440,9 @@ def aidr_config():
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
+    if not is_safe_url(base_url, allow_private=False):
+        return jsonify({"error": "Invalid or blocked AIDR base URL. Private/loopback IPs are not allowed."}), 400
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
@@ -463,10 +471,55 @@ def get_settings():
     })
 
 
+def is_safe_url(url, allow_private=False):
+    """Validate URLs to prevent SSRF vulnerabilities."""
+    if not url:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(socket.getaddrinfo, hostname, None)
+        try:
+            addrinfo = future.result(timeout=2.0)
+        except FutureTimeoutError:
+            return False
+        except Exception:
+            return False
+        finally:
+            if sys.version_info >= (3, 9):
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=False)
+
+        for info in addrinfo:
+            ip_str = info[4][0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_unspecified or ip.is_multicast or ip.is_link_local:
+                return False
+            if not allow_private:
+                if ip.is_private or ip.is_loopback:
+                    return False
+        return True
+    except Exception:
+        return False
+
 @app.route("/api/settings", methods=["POST"])
 def save_settings():
     """Save settings to session."""
     data = request.json
+
+    if "ollama_url" in data:
+        url = data["ollama_url"].strip()
+        if not is_safe_url(url, allow_private=True):
+            return jsonify({"error": "Invalid or blocked Ollama URL."}), 400
+        session["ollama_url"] = url
+
     if "provider" in data:
         session["provider"] = data["provider"]
     if "model" in data:
@@ -475,8 +528,6 @@ def save_settings():
         session["persona"] = data["persona"]
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
-    if "ollama_url" in data:
-        session["ollama_url"] = data["ollama_url"]
 
     # Clear active chat's messages when settings change
     active_chat_id = session.get("active_chat_id", "")
