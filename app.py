@@ -583,16 +583,20 @@ def get_models():
     provider = request.args.get("provider", session.get("provider", "openai"))
 
     if provider == "ollama":
-        ollama_url = session.get("ollama_url", "http://localhost:11434")
+        ollama_url = request.args.get("ollama_url", "").strip()
+        if ollama_url:
+            session["ollama_url"] = ollama_url
+        else:
+            ollama_url = session.get("ollama_url", "http://localhost:11434")
         try:
             import requests as req
             resp = req.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=5)
             resp.raise_for_status()
             data = resp.json()
             models = [m["name"] for m in data.get("models", [])]
-            return jsonify({"models": models if models else ["llama3.2", "mistral", "codellama"]})
+            return jsonify({"models": models})
         except Exception as e:
-            return jsonify({"models": ["llama3.2", "mistral", "codellama"], "error": str(e)})
+            return jsonify({"models": [], "error": str(e)})
     else:
         return jsonify({"models": DEFAULT_MODELS.get(provider, [])})
 

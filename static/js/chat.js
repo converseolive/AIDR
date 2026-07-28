@@ -241,6 +241,13 @@ function setupEventListeners() {
     // Refresh models
     refreshModelsBtn.addEventListener('click', fetchModels);
 
+    // Re-fetch models when the Ollama server URL changes
+    ollamaUrlInput.addEventListener('change', () => {
+        if (providerSelect.value === 'ollama') {
+            fetchModels();
+        }
+    });
+
     // Clear chat
     clearChatBtn.addEventListener('click', clearChat);
 
@@ -584,13 +591,24 @@ async function fetchModels() {
     refreshModelsBtn.classList.add('spinning');
 
     try {
-        const resp = await fetch(`/api/models?provider=${provider}`);
+        let url = `/api/models?provider=${provider}`;
+        if (provider === 'ollama' && ollamaUrlInput.value.trim()) {
+            url += `&ollama_url=${encodeURIComponent(ollamaUrlInput.value.trim())}`;
+        }
+        const resp = await fetch(url);
         const data = await resp.json();
 
         modelSelect.innerHTML = '';
         const models = data.models || [];
 
-        if (models.length === 0) {
+        if (data.error) {
+            console.warn('Could not fetch models:', data.error);
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = provider === 'ollama' ? '⚠ Cannot reach Ollama server' : '⚠ Could not fetch models';
+            opt.disabled = true;
+            modelSelect.appendChild(opt);
+        } else if (models.length === 0) {
             const opt = document.createElement('option');
             opt.value = '';
             opt.textContent = 'No models available';
@@ -1017,13 +1035,14 @@ async function restoreSavedCredentials() {
     const savedAidrToken = localStorage.getItem(LS_KEYS.AIDR_TOKEN);
     const savedAidrBaseUrl = localStorage.getItem(LS_KEYS.AIDR_BASE_URL);
 
-    // Restore form field values
+    // Restore form field values (Ollama URL first, so onProviderChange()
+    // fetches models against the saved server rather than an empty field)
+    if (savedOllamaUrl && ollamaUrlInput) {
+        ollamaUrlInput.value = savedOllamaUrl;
+    }
     if (savedProvider && providerSelect) {
         providerSelect.value = savedProvider;
         onProviderChange();
-    }
-    if (savedOllamaUrl && ollamaUrlInput) {
-        ollamaUrlInput.value = savedOllamaUrl;
     }
     if (savedPersona && personaSelect) {
         personaSelect.value = savedPersona;
@@ -1035,29 +1054,35 @@ async function restoreSavedCredentials() {
         aidrBaseUrlInput.value = savedAidrBaseUrl;
     }
 
-    // Re-submit API key to the server session if we have one saved
-    if (savedApiKey) {
+    // Re-submit saved settings to the server session. Ollama has no API key,
+    // so its URL must be restored to the session even without one.
+    const isOllamaRestore = savedProvider === 'ollama' && savedOllamaUrl;
+    if (savedApiKey || isOllamaRestore) {
         try {
             const settings = {
                 provider: savedProvider || providerSelect.value,
                 model: savedModel || modelSelect.value,
                 persona: savedPersona || personaSelect.value,
                 ollama_url: savedOllamaUrl || ollamaUrlInput.value,
-                api_key: savedApiKey,
             };
+            if (savedApiKey) {
+                settings.api_key = savedApiKey;
+            }
             const resp = await fetch('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(settings),
             });
             if (resp.ok) {
-                hasApiKey = true;
+                if (savedApiKey) {
+                    hasApiKey = true;
+                }
                 updateFooterIndicator(settings.provider, settings.model);
                 updatePersonaBadge(settings.persona);
-                console.log('[Credentials] ✅ API key restored from saved data.');
+                console.log('[Credentials] ✅ Settings restored from saved data.');
             }
         } catch (e) {
-            console.warn('[Credentials] Could not restore API key:', e);
+            console.warn('[Credentials] Could not restore settings:', e);
         }
     }
 
