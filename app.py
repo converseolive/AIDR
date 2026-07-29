@@ -417,13 +417,21 @@ def call_llm(messages, settings):
 
 
 # ---------------------------------------------------------------------------
+# Session Setup
+# ---------------------------------------------------------------------------
+@app.before_request
+def initialize_session():
+    """Ensure a session_id is always present for authorization."""
+    # Only initialize if the endpoint expects to use the session (skip static files)
+    if request.endpoint != 'static' and "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @app.route("/")
 def index():
     """Serve the chat page."""
-    if "session_id" not in session:
-        session["session_id"] = str(uuid.uuid4())
     return render_template("index.html")
 
 
@@ -434,17 +442,20 @@ def index():
 def list_chats():
     """Return all chat sessions (metadata only, no messages)."""
     chats = []
+    current_user_id = session.get("session_id")
     for cid, s in chat_sessions.items():
-        chats.append({
-            "id": cid,
-            "title": s.get("title", "New Chat"),
-            "persona": s.get("persona", "customer_support"),
-            "aidr_triggered": s.get("aidr_triggered", False),
-            "aidr_block_count": s.get("aidr_block_count", 0),
-            "message_count": len(s.get("messages", [])),
-            "created_at": s.get("created_at"),
-            "updated_at": s.get("updated_at"),
-        })
+        # Only return chats belonging to the current user (or legacy chats with no user_id if we wanted to support them, but for strict auth, only match)
+        if s.get("user_id") == current_user_id:
+            chats.append({
+                "id": cid,
+                "title": s.get("title", "New Chat"),
+                "persona": s.get("persona", "customer_support"),
+                "aidr_triggered": s.get("aidr_triggered", False),
+                "aidr_block_count": s.get("aidr_block_count", 0),
+                "message_count": len(s.get("messages", [])),
+                "created_at": s.get("created_at"),
+                "updated_at": s.get("updated_at"),
+            })
     # Sort by updated_at descending (most recent first)
     chats.sort(key=lambda c: c.get("updated_at") or "", reverse=True)
     return jsonify({"chats": chats})
@@ -458,6 +469,7 @@ def create_chat():
     persona_key = session.get("persona", "customer_support")
     chat_sessions[chat_id] = {
         "id": chat_id,
+        "user_id": session.get("session_id"),  # Track ownership to prevent IDOR
         "title": "New Chat",
         "messages": [],
         "persona": persona_key,
@@ -478,6 +490,9 @@ def get_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    # Enforce authorization (IDOR protection)
+    if s.get("user_id") != session.get("session_id"):
+        return jsonify({"error": "Unauthorized"}), 403
     session["active_chat_id"] = chat_id
     return jsonify(s)
 
@@ -486,6 +501,10 @@ def get_chat(chat_id):
 def delete_chat(chat_id):
     """Delete a chat session."""
     if chat_id in chat_sessions:
+        s = chat_sessions[chat_id]
+        # Enforce authorization (IDOR protection)
+        if s.get("user_id") != session.get("session_id"):
+            return jsonify({"error": "Unauthorized"}), 403
         del chat_sessions[chat_id]
         _save_chat_sessions()
         # If this was the active chat, clear it
@@ -500,6 +519,9 @@ def rename_chat(chat_id):
     s = chat_sessions.get(chat_id)
     if not s:
         return jsonify({"error": "Chat not found"}), 404
+    # Enforce authorization (IDOR protection)
+    if s.get("user_id") != session.get("session_id"):
+        return jsonify({"error": "Unauthorized"}), 403
     data = request.json or {}
     new_title = data.get("title", "").strip()
     if not new_title:
@@ -681,6 +703,7 @@ def chat():
         now = datetime.now(timezone.utc).isoformat()
         chat_sessions[chat_id] = {
             "id": chat_id,
+            "user_id": session.get("session_id"),  # Track ownership to prevent IDOR
             "title": "New Chat",
             "messages": [],
             "persona": persona_key,
@@ -691,6 +714,11 @@ def chat():
         }
 
     chat_session = chat_sessions[chat_id]
+
+    # Enforce authorization (IDOR protection)
+    if chat_session.get("user_id") != session.get("session_id"):
+        return jsonify({"error": "Unauthorized"}), 403
+
     history = chat_session["messages"]
 
     # Build messages with persona system prompt
@@ -801,7 +829,11 @@ def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
     if chat_id and chat_id in chat_sessions:
-        chat_sessions[chat_id]["messages"] = []
+        s = chat_sessions[chat_id]
+        # Enforce authorization (IDOR protection)
+        if s.get("user_id") != session.get("session_id"):
+            return jsonify({"error": "Unauthorized"}), 403
+        s["messages"] = []
         _save_chat_sessions()
     return jsonify({"status": "ok"})
 
