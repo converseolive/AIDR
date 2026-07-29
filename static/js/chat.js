@@ -70,7 +70,7 @@ const setupBannerBtn = document.getElementById('setupBannerBtn');
 // ============================================================
 let isWaiting = false;
 let selectedFile = null; // Store raw File object
-let isAidrEnabled = true;
+let isAidrEnabled = false;
 let isAidrConfigured = false;
 let hasApiKey = false;
 let activeChatId = null;
@@ -276,16 +276,26 @@ function setupEventListeners() {
     // Toggle AIDR
     if (aidrBadge) {
         aidrBadge.addEventListener('click', () => {
-            isAidrEnabled = !isAidrEnabled;
             const aidrIndicator = document.getElementById('aidrIndicator');
             const aidrIndicatorText = document.getElementById('aidrIndicatorText');
-            if (isAidrEnabled) {
+
+            if (!isAidrEnabled) {
+                // Trying to ENABLE — check if AIDR is configured
+                if (!isAidrConfigured) {
+                    // Show error toast
+                    showAidrError('Please configure your AIDR Collector Token in Settings before enabling AIDR protection.');
+                    openSettings();
+                    return;
+                }
+                isAidrEnabled = true;
                 aidrBadge.classList.remove('aidr-disabled');
                 aidrBadge.setAttribute('aria-pressed', 'true');
                 if (aidrText) aidrText.textContent = 'AIDR Protected';
                 if (aidrIndicator) aidrIndicator.classList.remove('aidr-off');
                 if (aidrIndicatorText) aidrIndicatorText.textContent = 'AIDR Active';
             } else {
+                // Disabling
+                isAidrEnabled = false;
                 aidrBadge.classList.add('aidr-disabled');
                 aidrBadge.setAttribute('aria-pressed', 'false');
                 if (aidrText) aidrText.textContent = 'AIDR Disabled';
@@ -352,6 +362,34 @@ function updateThemeIcons() {
         if (moonIcon) moonIcon.classList.add('hidden');
         if (sunIcon) sunIcon.classList.remove('hidden');
     }
+}
+
+// ============================================================
+// AIDR Error Toast
+// ============================================================
+function showAidrError(message) {
+    // Remove any existing toast
+    const existing = document.querySelector('.aidr-error-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'aidr-error-toast';
+    toast.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        <span>${message}</span>
+    `;
+    document.body.appendChild(toast);
+
+    // Trigger animation
+    requestAnimationFrame(() => toast.classList.add('visible'));
+
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+        toast.classList.remove('visible');
+        setTimeout(() => toast.remove(), 400);
+    }, 5000);
 }
 
 // ============================================================

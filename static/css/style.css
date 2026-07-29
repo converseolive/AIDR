@@ -474,6 +474,48 @@ body[data-persona="customer_support"] .new-chat-btn:hover {
     box-shadow: 0 0 8px var(--accent-glow);
 }
 
+/* --- AIDR Error Toast --- */
+.aidr-error-toast {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-120%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background: rgba(255, 0, 60, 0.15);
+    border: 1px solid rgba(255, 0, 60, 0.5);
+    border-radius: var(--radius-md);
+    color: var(--danger);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font-family);
+    letter-spacing: 0.02em;
+    box-shadow: 0 0 20px rgba(255, 0, 60, 0.3);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    z-index: 10000;
+    opacity: 0;
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease;
+    max-width: 500px;
+}
+
+.aidr-error-toast.visible {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
+.aidr-error-toast svg {
+    flex-shrink: 0;
+}
+
+body.light-mode .aidr-error-toast {
+    background: rgba(220, 38, 38, 0.1);
+    border-color: rgba(220, 38, 38, 0.5);
+    box-shadow: 0 4px 20px rgba(220, 38, 38, 0.15);
+}
+
 /* ============================================================
    Messages Area
    ============================================================ */
