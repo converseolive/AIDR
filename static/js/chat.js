@@ -52,7 +52,7 @@ const setupHint = document.getElementById('setupHint');
 
 // AIDR Config
 const aidrTokenInput = document.getElementById('aidrTokenInput');
-const aidrBaseUrlInput = document.getElementById('aidrBaseUrlInput');
+const aidrBaseUrlSelect = document.getElementById('aidrBaseUrlSelect');
 const aidrConnectBtn = document.getElementById('aidrConnectBtn');
 const aidrConnectText = document.getElementById('aidrConnectText');
 const aidrConnectStatus = document.getElementById('aidrConnectStatus');
@@ -370,7 +370,7 @@ async function checkAidrStatus() {
 
 async function connectAidr() {
     const token = aidrTokenInput.value.trim();
-    const baseUrl = aidrBaseUrlInput.value.trim();
+    const baseUrl = aidrBaseUrlSelect.value;
 
     if (!token) {
         aidrConnectStatus.textContent = 'Please enter your AIDR token.';
@@ -1050,8 +1050,8 @@ async function restoreSavedCredentials() {
         updatePersonaBadge(savedPersona);
         applyPersonaTheme(savedPersona);
     }
-    if (savedAidrBaseUrl && aidrBaseUrlInput) {
-        aidrBaseUrlInput.value = savedAidrBaseUrl;
+    if (savedAidrBaseUrl && aidrBaseUrlSelect) {
+        aidrBaseUrlSelect.value = savedAidrBaseUrl;
     }
 
     // Re-submit saved settings to the server session. Ollama has no API key,
@@ -1144,7 +1144,7 @@ function forgetSavedCredentials() {
     // Reset form fields
     if (apiKeyInput) apiKeyInput.value = '';
     if (aidrTokenInput) aidrTokenInput.value = '';
-    if (aidrBaseUrlInput) aidrBaseUrlInput.value = 'https://api.us-2.crowdstrike.com/aidr/aiguard';
+    if (aidrBaseUrlSelect) aidrBaseUrlSelect.value = 'https://api.us-2.crowdstrike.com/aidr/aiguard';
 
     // Reset AIDR button state
     if (aidrConnectBtn) {

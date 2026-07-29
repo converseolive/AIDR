@@ -64,8 +64,11 @@
             </div>
 
             <div class="settings-group">
-                <label class="settings-label" for="aidrBaseUrlInput">AIDR Base URL</label>
-                <input type="url" id="aidrBaseUrlInput" class="settings-input" placeholder="https://api.us-2.crowdstrike.com/aidr/aiguard" value="https://api.us-2.crowdstrike.com/aidr/aiguard">
+                <label class="settings-label" for="aidrBaseUrlSelect">AIDR Base URL</label>
+                <select id="aidrBaseUrlSelect" class="settings-select">
+                    <option value="https://api.us-2.crowdstrike.com/aidr/aiguard">US-2 — api.us-2.crowdstrike.com</option>
+                    <option value="https://api.eu-1.crowdstrike.com/aidr/aiguard">EU-1 — api.eu-1.crowdstrike.com</option>
+                </select>
             </div>
 
             <button class="aidr-connect-btn" id="aidrConnectBtn">
