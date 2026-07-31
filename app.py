@@ -419,11 +419,16 @@ def call_llm(messages, settings):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.before_request
+def ensure_session_id():
+    """Ensure every request has a session_id for authorization tracking."""
+    if "session_id" not in session:
+        session["session_id"] = str(uuid.uuid4())
+
+
 @app.route("/")
 def index():
     """Serve the chat page."""
-    if "session_id" not in session:
-        session["session_id"] = str(uuid.uuid4())
     return render_template("index.html")
 
 
@@ -432,9 +437,13 @@ def index():
 # ---------------------------------------------------------------------------
 @app.route("/api/chats", methods=["GET"])
 def list_chats():
-    """Return all chat sessions (metadata only, no messages)."""
+    """Return all chat sessions for the current user (metadata only, no messages)."""
     chats = []
+    user_id = session.get("session_id")
     for cid, s in chat_sessions.items():
+        # IDOR fix: Only return chats belonging to the current user (or legacy chats with no user_id if we want to be lenient, but we'll enforce it here)
+        if s.get("user_id") != user_id:
+            continue
         chats.append({
             "id": cid,
             "title": s.get("title", "New Chat"),
@@ -458,6 +467,7 @@ def create_chat():
     persona_key = session.get("persona", "customer_support")
     chat_sessions[chat_id] = {
         "id": chat_id,
+        "user_id": session.get("session_id"), # IDOR fix: associate chat with user
         "title": "New Chat",
         "messages": [],
         "persona": persona_key,
@@ -476,7 +486,7 @@ def create_chat():
 def get_chat(chat_id):
     """Load a specific chat session with full messages."""
     s = chat_sessions.get(chat_id)
-    if not s:
+    if not s or s.get("user_id") != session.get("session_id"):
         return jsonify({"error": "Chat not found"}), 404
     session["active_chat_id"] = chat_id
     return jsonify(s)
@@ -485,12 +495,15 @@ def get_chat(chat_id):
 @app.route("/api/chats/<chat_id>", methods=["DELETE"])
 def delete_chat(chat_id):
     """Delete a chat session."""
-    if chat_id in chat_sessions:
-        del chat_sessions[chat_id]
-        _save_chat_sessions()
-        # If this was the active chat, clear it
-        if session.get("active_chat_id") == chat_id:
-            session.pop("active_chat_id", None)
+    s = chat_sessions.get(chat_id)
+    if not s or s.get("user_id") != session.get("session_id"):
+        return jsonify({"error": "Chat not found"}), 404
+
+    del chat_sessions[chat_id]
+    _save_chat_sessions()
+    # If this was the active chat, clear it
+    if session.get("active_chat_id") == chat_id:
+        session.pop("active_chat_id", None)
     return jsonify({"status": "ok"})
 
 
@@ -498,7 +511,7 @@ def delete_chat(chat_id):
 def rename_chat(chat_id):
     """Rename a chat session."""
     s = chat_sessions.get(chat_id)
-    if not s:
+    if not s or s.get("user_id") != session.get("session_id"):
         return jsonify({"error": "Chat not found"}), 404
     data = request.json or {}
     new_title = data.get("title", "").strip()
@@ -681,6 +694,7 @@ def chat():
         now = datetime.now(timezone.utc).isoformat()
         chat_sessions[chat_id] = {
             "id": chat_id,
+            "user_id": session.get("session_id"), # IDOR fix: associate chat with user
             "title": "New Chat",
             "messages": [],
             "persona": persona_key,
@@ -691,6 +705,11 @@ def chat():
         }
 
     chat_session = chat_sessions[chat_id]
+
+    # IDOR fix: ensure user owns the chat they are trying to append to
+    if chat_session.get("user_id") != session.get("session_id"):
+        return jsonify({"error": "Chat not found"}), 404
+
     history = chat_session["messages"]
 
     # Build messages with persona system prompt
@@ -800,8 +819,9 @@ def chat():
 def clear_chat():
     """Clear the active chat's messages (keeps the session in history)."""
     chat_id = session.get("active_chat_id", "")
-    if chat_id and chat_id in chat_sessions:
-        chat_sessions[chat_id]["messages"] = []
+    s = chat_sessions.get(chat_id)
+    if s and s.get("user_id") == session.get("session_id"):
+        s["messages"] = []
         _save_chat_sessions()
     return jsonify({"status": "ok"})
 
