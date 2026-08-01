@@ -11,6 +11,41 @@ from datetime import datetime, timezone
 from flask import Flask, render_template, request, jsonify, session
 from dotenv import load_dotenv
 
+import urllib.parse
+import socket
+import ipaddress
+import sys
+from concurrent.futures import ThreadPoolExecutor
+
+def validate_url(url, allow_private=False):
+    if not url: return True
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ('http', 'https'): return False
+        hostname = parsed.hostname
+        if not hostname: return False
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(socket.getaddrinfo, hostname, None)
+        try:
+            addrs = future.result(timeout=2)
+        except Exception:
+            return False
+        finally:
+            if sys.version_info >= (3, 9):
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=False)
+
+        for addr in addrs:
+            ip = ipaddress.ip_address(addr[4][0])
+            if ip.is_unspecified or ip.is_multicast or ip.is_link_local: return False
+            if not allow_private and (ip.is_private or ip.is_loopback): return False
+        return True
+    except Exception:
+        return False
+
+
 load_dotenv()
 
 app = Flask(__name__)
@@ -30,9 +65,14 @@ def init_aidr():
         aidr_client = None
         return
     try:
+        base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
+        if not validate_url(base_url, allow_private=False):
+            print(f"[AIDR] ⚠️  Invalid AIDR base URL: {base_url}")
+            aidr_client = None
+            return
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
-            base_url_template=os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard"),
+            base_url_template=base_url,
             token=token,
         )
         print("[AIDR] ✅ AIGuard client initialized successfully.")
@@ -381,6 +421,8 @@ def call_gemini(messages, api_key, model):
 
 def call_ollama(messages, ollama_url, model):
     """Call a self-hosted Ollama instance (OpenAI-compatible API)."""
+    if not validate_url(ollama_url, allow_private=True):
+        raise ValueError("Invalid Ollama URL")
     from openai import OpenAI
     base_url = f"{ollama_url.rstrip('/')}/v1"
     client = OpenAI(base_url=base_url, api_key="ollama")  # Ollama doesn't need a real key
@@ -530,6 +572,8 @@ def aidr_config():
 
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
+    elif not validate_url(base_url, allow_private=False):
+        return jsonify({"error": "Invalid AIDR base URL"}), 400
 
     try:
         from crowdstrike_aidr import AIGuard
@@ -572,6 +616,8 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
+        if not validate_url(data["ollama_url"], allow_private=True):
+            return jsonify({"error": "Invalid Ollama URL"}), 400
         session["ollama_url"] = data["ollama_url"]
 
     return jsonify({"status": "ok"})
@@ -585,9 +631,14 @@ def get_models():
     if provider == "ollama":
         ollama_url = request.args.get("ollama_url", "").strip()
         if ollama_url:
+            if not validate_url(ollama_url, allow_private=True):
+                return jsonify({"models": [], "error": "Invalid Ollama URL"}), 400
             session["ollama_url"] = ollama_url
         else:
             ollama_url = session.get("ollama_url", "http://localhost:11434")
+            if not validate_url(ollama_url, allow_private=True):
+                 return jsonify({"models": [], "error": "Invalid Ollama URL"}), 400
+
         try:
             import requests as req
             resp = req.get(f"{ollama_url.rstrip('/')}/api/tags", timeout=5)
