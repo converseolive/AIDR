@@ -65,6 +65,35 @@ const setupBannerTitle = document.getElementById('setupBannerTitle');
 const setupBannerDesc = document.getElementById('setupBannerDesc');
 const setupBannerBtn = document.getElementById('setupBannerBtn');
 
+// AIDR Activity Timeline
+const activityBtn = document.getElementById('activityBtn');
+const activityPanel = document.getElementById('activityPanel');
+const activityOverlay = document.getElementById('activityOverlay');
+const activityClose = document.getElementById('activityClose');
+const activityList = document.getElementById('activityList');
+const activityStats = document.getElementById('activityStats');
+const activityCount = document.getElementById('activityCount');
+
+// Red-Team Library
+const redteamBtn = document.getElementById('redteamBtn');
+const redteamPanel = document.getElementById('redteamPanel');
+const redteamOverlay = document.getElementById('redteamOverlay');
+const redteamClose = document.getElementById('redteamClose');
+const redteamList = document.getElementById('redteamList');
+
+// A/B Compare
+const compareBtn = document.getElementById('compareBtn');
+const comparePanel = document.getElementById('comparePanel');
+const compareOverlay = document.getElementById('compareOverlay');
+const compareClose = document.getElementById('compareClose');
+const compareGrid = document.getElementById('compareGrid');
+const comparePromptEl = document.getElementById('comparePrompt');
+
+// Misc
+const exportBtn = document.getElementById('exportBtn');
+const chatSearchInput = document.getElementById('chatSearchInput');
+const usageIndicator = document.getElementById('usageIndicator');
+
 // ============================================================
 // State
 // ============================================================
@@ -75,6 +104,17 @@ let isAidrConfigured = false;
 let hasApiKey = false;
 let activeChatId = null;
 let chats = [];
+
+// AIDR activity timeline for the active chat
+let activityEvents = [];
+// Running token/cost total for the active chat
+let sessionUsage = { input_tokens: 0, output_tokens: 0, cost_usd: 0, priced: false };
+// Cached red-team library, keyed by persona
+let redteamCache = {};
+// Sidebar search term
+let chatFilter = '';
+// Last prompt the user sent, for Regenerate and A/B compare
+let lastUserMessage = '';
 
 // ============================================================
 // LocalStorage Persistence Keys
@@ -333,6 +373,80 @@ function setupEventListeners() {
     if (themeToggleBtn) {
         themeToggleBtn.addEventListener('click', toggleTheme);
     }
+
+    // AIDR activity timeline
+    if (activityBtn) activityBtn.addEventListener('click', () => toggleDrawer('activity'));
+    if (activityClose) activityClose.addEventListener('click', () => closeDrawer('activity'));
+    if (activityOverlay) activityOverlay.addEventListener('click', () => closeDrawer('activity'));
+
+    // Red-team library
+    if (redteamBtn) redteamBtn.addEventListener('click', () => toggleDrawer('redteam'));
+    if (redteamClose) redteamClose.addEventListener('click', () => closeDrawer('redteam'));
+    if (redteamOverlay) redteamOverlay.addEventListener('click', () => closeDrawer('redteam'));
+
+    // A/B compare
+    if (compareBtn) compareBtn.addEventListener('click', runCompare);
+    if (compareClose) compareClose.addEventListener('click', () => closeDrawer('compare'));
+    if (compareOverlay) compareOverlay.addEventListener('click', () => closeDrawer('compare'));
+
+    // Export transcript
+    if (exportBtn) exportBtn.addEventListener('click', exportTranscript);
+
+    // Sidebar search
+    if (chatSearchInput) {
+        chatSearchInput.addEventListener('input', () => {
+            chatFilter = chatSearchInput.value.trim().toLowerCase();
+            renderChatList();
+        });
+    }
+
+    // Escape closes whatever is open, innermost first
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (comparePanel && comparePanel.classList.contains('active')) return closeDrawer('compare');
+        if (settingsPanel && settingsPanel.classList.contains('active')) return closeSettings();
+        if (redteamPanel && redteamPanel.classList.contains('active')) return closeDrawer('redteam');
+        if (activityPanel && activityPanel.classList.contains('active')) return closeDrawer('activity');
+    });
+
+    // Keep focus inside open dialogs (Tab / Shift+Tab)
+    [settingsPanel, activityPanel, redteamPanel, comparePanel].forEach(panel => {
+        if (panel) panel.addEventListener('keydown', (e) => trapFocus(e, panel));
+    });
+}
+
+// ============================================================
+// Focus management
+// ============================================================
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+let lastFocusedBeforeDialog = null;
+
+function trapFocus(e, container) {
+    if (e.key !== 'Tab') return;
+    const items = Array.from(container.querySelectorAll(FOCUSABLE))
+        .filter(el => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+    }
+}
+
+function focusFirstIn(container) {
+    const target = container.querySelector(FOCUSABLE);
+    if (target) target.focus();
+}
+
+function restoreFocus() {
+    if (lastFocusedBeforeDialog && document.body.contains(lastFocusedBeforeDialog)) {
+        lastFocusedBeforeDialog.focus();
+    }
+    lastFocusedBeforeDialog = null;
 }
 
 // ============================================================
@@ -492,13 +606,18 @@ function updateSetupBanner() {
 // Settings
 // ============================================================
 function openSettings() {
+    lastFocusedBeforeDialog = document.activeElement;
     settingsPanel.classList.add('active');
     settingsOverlay.classList.add('active');
+    settingsPanel.setAttribute('aria-hidden', 'false');
+    focusFirstIn(settingsPanel);
 }
 
 function closeSettings() {
     settingsPanel.classList.remove('active');
     settingsOverlay.classList.remove('active');
+    settingsPanel.setAttribute('aria-hidden', 'true');
+    restoreFocus();
 }
 
 async function loadSettings() {
@@ -710,9 +829,17 @@ function updateWelcomeCards(persona) {
 // ============================================================
 // Chat Messages
 // ============================================================
-function sendMessage() {
-    const message = chatInput.value.trim();
+/**
+ * Send a chat turn. Pass `overrideText` to resend a prompt (Regenerate,
+ * red-team library) without touching the composer.
+ */
+function sendMessage(overrideText) {
+    const message = typeof overrideText === 'string'
+        ? overrideText.trim()
+        : chatInput.value.trim();
     if ((!message && !selectedFile) || isWaiting) return;
+
+    lastUserMessage = message;
 
     // Hide welcome screen dynamically
     const currentWelcomeScreen = document.getElementById('welcomeScreen');
@@ -722,7 +849,7 @@ function sendMessage() {
 
     // Add user message to UI
     appendMessage('user', message, selectedFile);
-    
+
     // Capture file before clearing input
     const fileDataToSend = selectedFile;
     
@@ -799,12 +926,24 @@ function sendMessage() {
                     loadChatList();
                 }
 
+                // Feed the AIDR activity timeline and the usage counter
+                ingestAidrEvents(data.aidr_events);
+                addUsage(data.usage);
+
                 if (data.blocked) {
-                    appendBlockedMessage(data.message, data.block_type);
+                    appendBlockedMessage(data.message, data.block_type, data.aidr);
                 } else {
-                    appendMessage('assistant', data.response);
+                    // Redaction happens on the request side, so surface the
+                    // input verdict as its own notice above the reply.
+                    const inputNotice = buildRedactionNotice(data.aidr_input);
+                    if (inputNotice) chatMessages.appendChild(inputNotice);
+                    appendMessage('assistant', data.response, null, {
+                        aidr: data.aidr_output,
+                        usage: data.usage,
+                    });
                 }
             } catch(e) {
+                console.error('Failed to render chat response:', e);
                 appendError('Error parsing server response.');
             }
         } else {
@@ -892,7 +1031,12 @@ function getFallbackMimeType(filename) {
     }
 }
 
-function appendMessage(role, content, attachment = null) {
+/**
+ * Render one chat message.
+ * `meta` carries the AIDR verdict for this turn and any token usage, both of
+ * which are rendered beneath the message body.
+ */
+function appendMessage(role, content, attachment = null, meta = {}) {
     const messageEl = document.createElement('div');
     messageEl.className = `message ${role}`;
 
@@ -931,17 +1075,105 @@ function appendMessage(role, content, attachment = null) {
     
     if (content) {
         const textWrapper = document.createElement('div');
+        textWrapper.className = 'message-text';
         textWrapper.innerHTML = formatMessage(content);
+        enhanceCodeBlocks(textWrapper);
         contentEl.appendChild(textWrapper);
     }
+
+    // AIDR verdict for this turn (detectors, redactions, guard latency)
+    const verdict = buildVerdictPanel(meta.aidr);
+    if (verdict) contentEl.appendChild(verdict);
+
+    // Per-message actions: copy, plus regenerate / edit for the last user turn
+    contentEl.appendChild(buildMessageActions(role, content, meta));
 
     messageEl.appendChild(avatar);
     messageEl.appendChild(contentEl);
     chatMessages.appendChild(messageEl);
     scrollToBottom();
+    return messageEl;
 }
 
-function appendBlockedMessage(message, blockType) {
+/**
+ * Copy / regenerate / edit controls beneath a message.
+ */
+function buildMessageActions(role, content, meta = {}) {
+    const bar = document.createElement('div');
+    bar.className = 'message-actions';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'msg-action-btn';
+    copyBtn.textContent = 'Copy';
+    copyBtn.setAttribute('aria-label', 'Copy this message');
+    copyBtn.addEventListener('click', async () => {
+        try {
+            await navigator.clipboard.writeText(content || '');
+            copyBtn.textContent = 'Copied';
+        } catch (e) {
+            copyBtn.textContent = 'Copy failed';
+        }
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1600);
+    });
+    bar.appendChild(copyBtn);
+
+    if (role === 'user') {
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'msg-action-btn';
+        editBtn.textContent = 'Edit & resend';
+        editBtn.setAttribute('aria-label', 'Edit this message and send it again');
+        editBtn.addEventListener('click', () => {
+            chatInput.value = content || '';
+            sendBtn.disabled = !chatInput.value.trim();
+            autoResizeTextarea();
+            chatInput.focus();
+        });
+        bar.appendChild(editBtn);
+    }
+
+    if (role === 'assistant') {
+        const regenBtn = document.createElement('button');
+        regenBtn.type = 'button';
+        regenBtn.className = 'msg-action-btn';
+        regenBtn.textContent = 'Regenerate';
+        regenBtn.setAttribute('aria-label', 'Send the previous prompt again');
+        regenBtn.addEventListener('click', () => {
+            const prompt = lastUserMessage || findPreviousUserMessage(regenBtn);
+            if (!prompt) {
+                showAidrError('Nothing to regenerate — no earlier prompt found.');
+                return;
+            }
+            sendMessage(prompt);
+        });
+        bar.appendChild(regenBtn);
+
+        if (meta.usage && (meta.usage.input_tokens || meta.usage.output_tokens)) {
+            const badge = document.createElement('span');
+            badge.className = 'msg-usage';
+            badge.textContent = formatUsage(meta.usage);
+            bar.appendChild(badge);
+        }
+    }
+
+    return bar;
+}
+
+/** Walk backwards from an element to the nearest preceding user message text. */
+function findPreviousUserMessage(el) {
+    let node = el.closest('.message');
+    while (node) {
+        node = node.previousElementSibling;
+        if (node && node.classList.contains('user')) {
+            const text = node.querySelector('.message-text');
+            return text ? text.textContent.trim() : '';
+        }
+    }
+    return '';
+}
+
+function appendBlockedMessage(message, blockType, aidr = null) {
     const messageEl = document.createElement('div');
     messageEl.className = 'message assistant blocked';
 
@@ -963,10 +1195,16 @@ function appendBlockedMessage(message, blockType) {
 
     contentEl.innerHTML = headerHTML + `<p>${escapeHtml(message)}</p>`;
 
+    // Expand the verdict by default on a block — this is the reason the
+    // message never made it through, so it shouldn't need a click to see.
+    const verdict = buildVerdictPanel(aidr, { open: true });
+    if (verdict) contentEl.appendChild(verdict);
+
     messageEl.appendChild(avatar);
     messageEl.appendChild(contentEl);
     chatMessages.appendChild(messageEl);
     scrollToBottom();
+    return messageEl;
 }
 
 function appendError(message) {
@@ -978,48 +1216,214 @@ function appendError(message) {
 }
 
 // ============================================================
-// Message Formatting (basic markdown)
+// Message Formatting (markdown)
+//
+// Everything is HTML-escaped before any markup is generated, so model output
+// can never inject tags. Code spans and fences are lifted out first so their
+// contents are never treated as markdown.
 // ============================================================
-function formatMessage(text) {
-    if (!text) return '';
+function escapeHtml(text) {
+    return String(text === null || text === undefined ? '' : text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
 
-    let html = escapeHtml(text);
+function renderInline(s) {
+    return s
+        // [label](https://…) — http(s) only
+        .replace(
+            /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+            '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+        )
+        .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, '<strong>$2</strong>')
+        .replace(/~~(?=\S)([\s\S]*?\S)~~/g, '<del>$1</del>')
+        .replace(/(^|[^*\w])\*(?=\S)([^*\n]*?\S)\*(?![*\w])/g, '$1<em>$2</em>')
+        .replace(/(^|[^_\w])_(?=\S)([^_\n]*?\S)_(?![_\w])/g, '$1<em>$2</em>');
+}
 
-    // Code blocks (```...```)
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-        return `<pre><code>${code.trim()}</code></pre>`;
+function formatMessage(src) {
+    if (!src) return '';
+
+    let text = String(src).replace(/\r\n/g, '\n');
+
+    // 1. Lift fenced code blocks out before anything else sees them.
+    const fences = [];
+    text = text.replace(/```([\w+#.-]*)[ \t]*\n?([\s\S]*?)```/g, (_, lang, code) => {
+        fences.push({ lang: lang || '', code: code.replace(/\n+$/, '') });
+        return `\u0000F${fences.length - 1}\u0000`;
     });
 
-    // Inline code (`...`)
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // 2. Lift inline code spans.
+    const spans = [];
+    text = text.replace(/`([^`\n]+)`/g, (_, code) => {
+        spans.push(code);
+        return `\u0000S${spans.length - 1}\u0000`;
+    });
 
-    // Bold (**...**)
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    text = escapeHtml(text);
 
-    // Italic (*...*)
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    // 3. Block-level pass.
+    const lines = text.split('\n');
+    const out = [];
+    let paragraph = [];
+    const openLists = []; // stack of 'ul' | 'ol'
 
-    // Unordered lists
-    html = html.replace(/^[-•]\s+(.+)/gm, '<li>$1</li>');
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    const flushParagraph = () => {
+        if (paragraph.length) {
+            out.push(`<p>${renderInline(paragraph.join('<br>'))}</p>`);
+            paragraph = [];
+        }
+    };
+    const closeLists = (depth = 0) => {
+        while (openLists.length > depth) out.push(`</${openLists.pop()}>`);
+    };
 
-    // Ordered lists
-    html = html.replace(/^\d+\.\s+(.+)/gm, '<li>$1</li>');
+    const isFencePlaceholder = (l) => /^\u0000F\d+\u0000$/.test(l.trim());
 
-    // Line breaks
-    html = html.replace(/\n/g, '<br>');
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
 
-    // Clean up
-    html = html.replace(/<br><\/ul>/g, '</ul>');
-    html = html.replace(/<ul><br>/g, '<ul>');
+        // Blank line — ends a paragraph (but not necessarily a list)
+        if (!trimmed) {
+            flushParagraph();
+            continue;
+        }
+
+        // Code fence placeholder — emit on its own
+        if (isFencePlaceholder(line)) {
+            flushParagraph();
+            closeLists();
+            out.push(trimmed);
+            continue;
+        }
+
+        // Horizontal rule
+        if (/^(\*\s*){3,}$|^(-\s*){3,}$|^(_\s*){3,}$/.test(trimmed)) {
+            flushParagraph();
+            closeLists();
+            out.push('<hr>');
+            continue;
+        }
+
+        // Heading
+        const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+        if (heading) {
+            flushParagraph();
+            closeLists();
+            const level = Math.min(heading[1].length + 2, 6); // h1 → h3 in-bubble
+            out.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+            continue;
+        }
+
+        // Blockquote
+        if (/^&gt;\s?/.test(trimmed)) {
+            flushParagraph();
+            closeLists();
+            out.push(`<blockquote>${renderInline(trimmed.replace(/^&gt;\s?/, ''))}</blockquote>`);
+            continue;
+        }
+
+        // Table: a pipe row followed by a |---|---| separator
+        if (
+            trimmed.includes('|') &&
+            i + 1 < lines.length &&
+            /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(lines[i + 1]) &&
+            lines[i + 1].includes('-')
+        ) {
+            flushParagraph();
+            closeLists();
+            const cells = (row) =>
+                row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+            const headers = cells(trimmed);
+            const body = [];
+            i += 2;
+            while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+                body.push(cells(lines[i]));
+                i++;
+            }
+            i--; // step back; the for-loop increments
+            let table = '<div class="md-table-wrap"><table><thead><tr>';
+            table += headers.map(h => `<th>${renderInline(h)}</th>`).join('');
+            table += '</tr></thead><tbody>';
+            body.forEach(row => {
+                table += '<tr>' + headers
+                    .map((_, ci) => `<td>${renderInline(row[ci] || '')}</td>`)
+                    .join('') + '</tr>';
+            });
+            out.push(table + '</tbody></table></div>');
+            continue;
+        }
+
+        // List item (supports one level of nesting via indentation)
+        const listItem = line.match(/^(\s*)(?:([-*+•])|(\d+)[.)])\s+(.*)$/);
+        if (listItem) {
+            flushParagraph();
+            const indent = listItem[1].replace(/\t/g, '  ').length;
+            const type = listItem[2] ? 'ul' : 'ol';
+            const depth = Math.min(Math.floor(indent / 2) + 1, 3);
+
+            closeLists(depth);
+            while (openLists.length < depth) {
+                out.push(`<${type}>`);
+                openLists.push(type);
+            }
+            // Same depth but the marker type changed — swap the list
+            if (openLists[openLists.length - 1] !== type) {
+                out.push(`</${openLists.pop()}>`);
+                out.push(`<${type}>`);
+                openLists.push(type);
+            }
+            out.push(`<li>${renderInline(listItem[4])}</li>`);
+            continue;
+        }
+
+        closeLists();
+        paragraph.push(trimmed);
+    }
+    flushParagraph();
+    closeLists();
+
+    let html = out.join('\n');
+
+    // 4. Restore inline code, then fenced blocks.
+    html = html.replace(/\u0000S(\d+)\u0000/g, (_, n) => `<code>${escapeHtml(spans[+n])}</code>`);
+    html = html.replace(/\u0000F(\d+)\u0000/g, (_, n) => {
+        const { lang, code } = fences[+n];
+        const label = lang ? `<span class="code-lang">${escapeHtml(lang)}</span>` : '';
+        return (
+            '<div class="code-block">' +
+            `<div class="code-block-head">${label}` +
+            '<button type="button" class="code-copy-btn" aria-label="Copy code">Copy</button>' +
+            '</div>' +
+            `<pre><code>${escapeHtml(code)}</code></pre>` +
+            '</div>'
+        );
+    });
 
     return html;
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.appendChild(document.createTextNode(text));
-    return div.innerHTML;
+/**
+ * Wire up copy buttons on any code blocks inside a rendered message.
+ */
+function enhanceCodeBlocks(container) {
+    container.querySelectorAll('.code-copy-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const code = btn.closest('.code-block')?.querySelector('code');
+            if (!code) return;
+            try {
+                await navigator.clipboard.writeText(code.textContent);
+                btn.textContent = 'Copied';
+            } catch (e) {
+                btn.textContent = 'Copy failed';
+            }
+            setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+        });
+    });
 }
 
 // ============================================================
@@ -1230,11 +1634,19 @@ async function loadChatList() {
 
 function renderChatList() {
     if (!sidebarContent) return;
-    
+
     sidebarContent.innerHTML = '';
-    
+
+    const visible = chatFilter
+        ? chats.filter(c => (c.title || '').toLowerCase().includes(chatFilter))
+        : chats;
+
     if (chats.length === 0) {
-        sidebarContent.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; text-align: center; margin-top: 20px;">No previous chats.</div>';
+        sidebarContent.innerHTML = '<div class="sidebar-empty">No previous chats.</div>';
+        return;
+    }
+    if (visible.length === 0) {
+        sidebarContent.innerHTML = `<div class="sidebar-empty">No chats match “${escapeHtml(chatFilter)}”.</div>`;
         return;
     }
 
@@ -1248,7 +1660,7 @@ function renderChatList() {
         'Older': []
     };
 
-    chats.forEach(chat => {
+    visible.forEach(chat => {
         const chatDate = new Date(chat.updated_at);
         const dateString = chatDate.toDateString();
         const diffDays = Math.floor((new Date() - chatDate) / (1000 * 60 * 60 * 24));
@@ -1322,6 +1734,12 @@ async function createNewChat() {
         activeChatId = data.id;
         chatMessages.innerHTML = '';
 
+        // Fresh chat — reset the AIDR timeline, usage counter and resend target
+        activityEvents = [];
+        lastUserMessage = '';
+        resetUsage();
+        renderActivity();
+
         // Show welcome screen using the persona the new chat was created with
         const currentPersona = data.persona || document.body.dataset.persona || 'customer_support';
         updatePersonaBadge(currentPersona);
@@ -1367,12 +1785,43 @@ async function switchChat(id) {
         
         chatMessages.innerHTML = '';
         
+        // Restore the AIDR timeline and usage total for this chat
+        activityEvents = Array.isArray(data.aidr_events) ? data.aidr_events : [];
+        resetUsage();
+        renderActivity();
+
         if (data.messages && data.messages.length > 0) {
             data.messages.forEach(msg => {
-                if (msg.role !== 'system') {
-                    appendMessage(msg.role, msg.content);
+                if (msg.role === 'system') return;
+                if (msg.blocked === 'input') {
+                    // Show what the user actually typed, then the block card —
+                    // matching what they saw live.
+                    appendMessage('user', msg.content, null, { aidr: msg.aidr });
+                    appendBlockedMessage(
+                        '⚠️ Your message was blocked by CrowdStrike AIDR security.',
+                        'input',
+                        msg.aidr
+                    );
+                    return;
                 }
+                if (msg.blocked === 'output') {
+                    appendBlockedMessage(
+                        '⚠️ The AI response was blocked by CrowdStrike AIDR security.',
+                        'output',
+                        msg.aidr
+                    );
+                    return;
+                }
+                appendMessage(msg.role, msg.content, null, {
+                    aidr: msg.aidr,
+                    usage: msg.usage,
+                });
+                addUsage(msg.usage);
             });
+            // Remember the last prompt so Regenerate works after a reload
+            const lastUser = [...data.messages].reverse()
+                .find(m => m.role === 'user' && m.content);
+            lastUserMessage = lastUser ? lastUser.content : '';
         } else {
             // Empty chat, show welcome
             const currentPersona = data.persona || document.body.dataset.persona || 'customer_support';
@@ -1471,4 +1920,585 @@ function startRenaming(itemEl, id) {
             titleEl.blur(); // Cancels rename implicitly because content matches oldTitle
         }
     });
+}
+
+
+// ============================================================
+// AIDR Verdict Panels
+//
+// The guard already returns detector names, policies, redactions and timing —
+// these render it instead of collapsing everything to "blocked".
+// ============================================================
+const VERDICT_LABELS = {
+    allowed: 'Allowed',
+    blocked: 'Blocked',
+    aidr_error: 'Guard unavailable',
+    aidr_unavailable: 'Guard not configured',
+};
+
+function firedDetectors(aidr) {
+    return (aidr && Array.isArray(aidr.detectors) ? aidr.detectors : [])
+        .filter(d => d && d.detected);
+}
+
+/**
+ * Collapsible AIDR verdict for one guard call. Returns null when there is
+ * nothing worth showing (guard disabled, or a clean pass with no detail).
+ */
+function buildVerdictPanel(aidr, opts = {}) {
+    if (!aidr || !aidr.status) return null;
+    if (aidr.status === 'aidr_unavailable') return null;
+
+    const fired = firedDetectors(aidr);
+    const isBlocked = aidr.status === 'blocked';
+    const isError = aidr.status === 'aidr_error';
+
+    // A clean pass with no detectors, no redaction and no timing has nothing
+    // to disclose — don't clutter every message with an empty panel.
+    if (!isBlocked && !isError && !fired.length && !aidr.transformed
+        && aidr.latency_ms === undefined) {
+        return null;
+    }
+
+    const details = document.createElement('details');
+    details.className = 'aidr-verdict ' + (
+        isBlocked ? 'is-blocked' : isError ? 'is-error'
+        : aidr.transformed ? 'is-transformed' : 'is-allowed'
+    );
+    if (opts.open) details.open = true;
+
+    const summary = document.createElement('summary');
+    const bits = [];
+    bits.push(`<span class="verdict-dot"></span>`);
+    bits.push(`<span class="verdict-label">AIDR ${escapeHtml(aidr.event_type || 'guard')}</span>`);
+    bits.push(`<span class="verdict-status">${escapeHtml(VERDICT_LABELS[aidr.status] || aidr.status)}</span>`);
+    if (aidr.transformed) bits.push('<span class="verdict-chip warn">Redacted</span>');
+    if (fired.length) {
+        bits.push(`<span class="verdict-chip">${fired.length} detector${fired.length === 1 ? '' : 's'}</span>`);
+    }
+    if (aidr.latency_ms !== undefined && aidr.latency_ms !== null) {
+        bits.push(`<span class="verdict-latency">${aidr.latency_ms} ms</span>`);
+    }
+    summary.innerHTML = bits.join('');
+    details.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'verdict-body';
+
+    if (isError) {
+        body.innerHTML += `
+            <div class="verdict-warning">
+                The AIDR guard could not be reached, so this turn was
+                <strong>not inspected</strong> and was allowed through
+                (fail-open).
+                ${aidr.error ? `<code>${escapeHtml(aidr.error)}</code>` : ''}
+            </div>`;
+    }
+
+    if (aidr.policy) {
+        body.innerHTML += `
+            <div class="verdict-row">
+                <span class="verdict-key">Policy</span>
+                <span class="verdict-val">${escapeHtml(aidr.policy)}</span>
+            </div>`;
+    }
+
+    if (fired.length) {
+        const rows = fired.map(d => {
+            const meta = [];
+            if (d.confidence !== null && d.confidence !== undefined) {
+                const pct = typeof d.confidence === 'number' && d.confidence <= 1
+                    ? `${Math.round(d.confidence * 100)}%`
+                    : String(d.confidence);
+                meta.push(`<span class="detector-confidence">${escapeHtml(pct)}</span>`);
+            }
+            if (d.entities && d.entities.length) {
+                meta.push(d.entities.slice(0, 8)
+                    .map(e => `<span class="entity-chip">${escapeHtml(e)}</span>`)
+                    .join(''));
+            }
+            const detail = d.detail
+                ? `<div class="detector-detail">${escapeHtml(d.detail)}</div>`
+                : '';
+            return `
+                <li class="detector-item">
+                    <div class="detector-head">
+                        <code class="detector-name">${escapeHtml(d.name)}</code>
+                        ${meta.join('')}
+                    </div>
+                    ${detail}
+                </li>`;
+        }).join('');
+        body.innerHTML += `
+            <div class="verdict-row column">
+                <span class="verdict-key">Detectors fired</span>
+                <ul class="detector-list">${rows}</ul>
+            </div>`;
+    } else if (!isError) {
+        body.innerHTML += `
+            <div class="verdict-row">
+                <span class="verdict-key">Detectors</span>
+                <span class="verdict-val muted">None fired</span>
+            </div>`;
+    }
+
+    details.appendChild(body);
+
+    // Redaction diff — what AIDR actually masked
+    if (aidr.redacted && aidr.redacted.before && aidr.redacted.after) {
+        body.appendChild(buildRedactionDiff(aidr.redacted));
+    } else if (aidr.transformed && aidr.guard_output) {
+        const wrap = document.createElement('div');
+        wrap.className = 'verdict-row column';
+        wrap.innerHTML = `
+            <span class="verdict-key">Content after AIDR</span>
+            <pre class="redaction-block">${escapeHtml(aidr.guard_output)}</pre>`;
+        body.appendChild(wrap);
+    }
+
+    return details;
+}
+
+/**
+ * A standalone notice for input-side redaction, shown above the reply so the
+ * user can see what left their message before the model saw it.
+ */
+function buildRedactionNotice(aidr) {
+    if (!aidr || !aidr.transformed) return null;
+    const el = document.createElement('div');
+    el.className = 'redaction-notice';
+    el.innerHTML = `
+        <div class="redaction-notice-head">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            AIDR redacted content in your message before it reached the model
+        </div>`;
+    if (aidr.redacted && aidr.redacted.before && aidr.redacted.after) {
+        el.appendChild(buildRedactionDiff(aidr.redacted));
+    }
+    return el;
+}
+
+/**
+ * Word-level before/after diff of an AIDR redaction.
+ */
+function buildRedactionDiff(redacted) {
+    const wrap = document.createElement('div');
+    wrap.className = 'redaction-diff';
+
+    const before = String(redacted.before).split(/(\s+)/);
+    const after = String(redacted.after).split(/(\s+)/);
+    const { removed, added } = diffTokens(before, after);
+
+    wrap.innerHTML = `
+        <div class="diff-col">
+            <span class="diff-label">Before</span>
+            <pre class="redaction-block">${removed}</pre>
+        </div>
+        <div class="diff-col">
+            <span class="diff-label">After AIDR</span>
+            <pre class="redaction-block">${added}</pre>
+        </div>`;
+    return wrap;
+}
+
+/**
+ * Longest-common-subsequence token diff. Returns escaped HTML for each side
+ * with the differing runs wrapped in <mark>.
+ */
+function diffTokens(a, b) {
+    const n = a.length, m = b.length;
+    // Guard against pathological input — fall back to plain text.
+    if (n * m > 400000) {
+        return { removed: escapeHtml(a.join('')), added: escapeHtml(b.join('')) };
+    }
+
+    const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            lcs[i][j] = a[i] === b[j]
+                ? lcs[i + 1][j + 1] + 1
+                : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+        }
+    }
+
+    let removed = '', added = '';
+    let i = 0, j = 0;
+    const flushRemoved = (s) => s ? `<mark class="diff-removed">${escapeHtml(s)}</mark>` : '';
+    const flushAdded = (s) => s ? `<mark class="diff-added">${escapeHtml(s)}</mark>` : '';
+    let pendingA = '', pendingB = '';
+
+    while (i < n && j < m) {
+        if (a[i] === b[j]) {
+            removed += flushRemoved(pendingA); pendingA = '';
+            added += flushAdded(pendingB); pendingB = '';
+            removed += escapeHtml(a[i]);
+            added += escapeHtml(b[j]);
+            i++; j++;
+        } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+            pendingA += a[i++];
+        } else {
+            pendingB += b[j++];
+        }
+    }
+    while (i < n) pendingA += a[i++];
+    while (j < m) pendingB += b[j++];
+    removed += flushRemoved(pendingA);
+    added += flushAdded(pendingB);
+
+    return { removed, added };
+}
+
+// ============================================================
+// AIDR Activity Timeline
+// ============================================================
+function ingestAidrEvents(events) {
+    if (!Array.isArray(events) || !events.length) return;
+    activityEvents = activityEvents.concat(events);
+    if (activityEvents.length > 200) {
+        activityEvents = activityEvents.slice(-200);
+    }
+    renderActivity();
+}
+
+function renderActivity() {
+    if (!activityList || !activityStats) return;
+
+    // Header badge
+    if (activityCount) {
+        const blocked = activityEvents.filter(e => e.status === 'blocked').length;
+        if (blocked > 0) {
+            activityCount.textContent = String(blocked);
+            activityCount.classList.remove('hidden');
+        } else {
+            activityCount.classList.add('hidden');
+        }
+    }
+
+    if (!activityEvents.length) {
+        activityStats.innerHTML = '';
+        activityList.innerHTML =
+            '<div class="drawer-empty">No guarded turns yet. Send a message with AIDR enabled to populate the timeline.</div>';
+        return;
+    }
+
+    const total = activityEvents.length;
+    const blocked = activityEvents.filter(e => e.status === 'blocked').length;
+    const redacted = activityEvents.filter(e => e.transformed).length;
+    const errors = activityEvents.filter(e => e.status === 'aidr_error').length;
+    const latencies = activityEvents
+        .map(e => e.latency_ms)
+        .filter(v => typeof v === 'number');
+    const avg = latencies.length
+        ? Math.round(latencies.reduce((s, v) => s + v, 0) / latencies.length)
+        : null;
+
+    activityStats.innerHTML = `
+        <div class="stat-tile"><span class="stat-val">${total}</span><span class="stat-key">Guarded</span></div>
+        <div class="stat-tile ${blocked ? 'danger' : ''}"><span class="stat-val">${blocked}</span><span class="stat-key">Blocked</span></div>
+        <div class="stat-tile ${redacted ? 'warn' : ''}"><span class="stat-val">${redacted}</span><span class="stat-key">Redacted</span></div>
+        <div class="stat-tile"><span class="stat-val">${avg === null ? '—' : avg + 'ms'}</span><span class="stat-key">Avg guard</span></div>
+        ${errors ? `<div class="stat-tile danger"><span class="stat-val">${errors}</span><span class="stat-key">Guard errors</span></div>` : ''}
+    `;
+
+    activityList.innerHTML = '';
+    [...activityEvents].reverse().forEach(e => {
+        const item = document.createElement('div');
+        item.className = 'activity-item status-' + (e.status || 'unknown');
+
+        const fired = firedDetectors(e).map(d => d.name);
+        const time = e.ts ? new Date(e.ts).toLocaleTimeString() : '—';
+
+        item.innerHTML = `
+            <div class="activity-head">
+                <span class="activity-phase">${escapeHtml(e.phase || '—')}</span>
+                <span class="activity-status">${escapeHtml(VERDICT_LABELS[e.status] || e.status || '—')}</span>
+                <span class="activity-time">${escapeHtml(time)}</span>
+            </div>
+            ${e.preview ? `<div class="activity-preview">${escapeHtml(e.preview)}${e.preview.length >= 160 ? '…' : ''}</div>` : ''}
+            <div class="activity-meta">
+                ${e.policy ? `<span class="verdict-chip">${escapeHtml(e.policy)}</span>` : ''}
+                ${fired.length
+                    ? fired.map(n => `<span class="entity-chip">${escapeHtml(n)}</span>`).join('')
+                    : '<span class="verdict-val muted">no detectors</span>'}
+                ${e.transformed ? '<span class="verdict-chip warn">redacted</span>' : ''}
+                ${typeof e.latency_ms === 'number' ? `<span class="activity-time">${e.latency_ms} ms</span>` : ''}
+            </div>
+            ${e.error ? `<div class="verdict-warning"><code>${escapeHtml(e.error)}</code></div>` : ''}
+        `;
+        activityList.appendChild(item);
+    });
+}
+
+// ============================================================
+// Drawers (activity / red-team / compare)
+// ============================================================
+const DRAWERS = {
+    activity: () => ({ panel: activityPanel, overlay: activityOverlay, btn: activityBtn }),
+    redteam: () => ({ panel: redteamPanel, overlay: redteamOverlay, btn: redteamBtn }),
+    compare: () => ({ panel: comparePanel, overlay: compareOverlay, btn: null }),
+};
+
+function openDrawer(name) {
+    const { panel, overlay, btn } = DRAWERS[name]();
+    if (!panel) return;
+    lastFocusedBeforeDialog = document.activeElement;
+    panel.classList.add('active');
+    panel.setAttribute('aria-hidden', 'false');
+    if (overlay) overlay.classList.add('active');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+    focusFirstIn(panel);
+}
+
+function closeDrawer(name) {
+    const { panel, overlay, btn } = DRAWERS[name]();
+    if (!panel) return;
+    panel.classList.remove('active');
+    panel.setAttribute('aria-hidden', 'true');
+    if (overlay) overlay.classList.remove('active');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+    restoreFocus();
+}
+
+function toggleDrawer(name) {
+    const { panel } = DRAWERS[name]();
+    if (!panel) return;
+    if (panel.classList.contains('active')) {
+        closeDrawer(name);
+        return;
+    }
+    // Only one drawer at a time
+    Object.keys(DRAWERS).forEach(k => { if (k !== name) closeDrawer(k); });
+    if (name === 'redteam') loadRedteam();
+    if (name === 'activity') renderActivity();
+    openDrawer(name);
+}
+
+// ============================================================
+// Red-Team Prompt Library
+// ============================================================
+async function loadRedteam() {
+    const persona = (personaSelect && personaSelect.value)
+        || document.body.dataset.persona
+        || 'customer_support';
+
+    if (redteamCache[persona]) {
+        renderRedteam(redteamCache[persona]);
+        return;
+    }
+
+    redteamList.innerHTML = '<div class="drawer-empty">Loading…</div>';
+    try {
+        const resp = await fetch(`/api/redteam?persona=${encodeURIComponent(persona)}`);
+        const data = await resp.json();
+        redteamCache[persona] = data.prompts || [];
+        renderRedteam(redteamCache[persona]);
+    } catch (e) {
+        console.warn('Could not load red-team library:', e);
+        redteamList.innerHTML = '<div class="drawer-empty">Could not load the prompt library.</div>';
+    }
+}
+
+function renderRedteam(prompts) {
+    redteamList.innerHTML = '';
+    if (!prompts.length) {
+        redteamList.innerHTML = '<div class="drawer-empty">No prompts available.</div>';
+        return;
+    }
+
+    // Group by detector category
+    const groups = new Map();
+    prompts.forEach(p => {
+        if (!groups.has(p.category)) groups.set(p.category, []);
+        groups.get(p.category).push(p);
+    });
+
+    groups.forEach((items, category) => {
+        const label = document.createElement('div');
+        label.className = 'drawer-group-label';
+        label.textContent = category;
+        redteamList.appendChild(label);
+
+        items.forEach(p => {
+            const card = document.createElement('div');
+            card.className = 'redteam-card';
+            card.innerHTML = `
+                <div class="redteam-head">
+                    <span class="redteam-icon">${escapeHtml(p.icon || '⚠️')}</span>
+                    <span class="redteam-label">${escapeHtml(p.label)}</span>
+                    ${p.expect ? `<code class="redteam-expect">${escapeHtml(p.expect)}</code>` : ''}
+                </div>
+                <pre class="redteam-prompt">${escapeHtml(p.prompt)}</pre>
+                <div class="redteam-actions">
+                    <button type="button" class="msg-action-btn" data-act="load">Load</button>
+                    <button type="button" class="msg-action-btn primary" data-act="send">Send</button>
+                </div>`;
+
+            card.querySelector('[data-act="load"]').addEventListener('click', () => {
+                chatInput.value = p.prompt;
+                sendBtn.disabled = false;
+                autoResizeTextarea();
+                closeDrawer('redteam');
+                chatInput.focus();
+            });
+            card.querySelector('[data-act="send"]').addEventListener('click', () => {
+                closeDrawer('redteam');
+                sendMessage(p.prompt);
+            });
+
+            redteamList.appendChild(card);
+        });
+    });
+}
+
+// ============================================================
+// A/B Compare — AIDR on vs off
+// ============================================================
+async function runCompare() {
+    const prompt = chatInput.value.trim() || lastUserMessage;
+    if (!prompt) {
+        showAidrError('Type a prompt (or send one first) to compare AIDR on vs off.');
+        chatInput.focus();
+        return;
+    }
+
+    comparePromptEl.innerHTML = `<span class="compare-prompt-label">Prompt</span><pre>${escapeHtml(prompt)}</pre>`;
+    compareGrid.innerHTML = '<div class="drawer-empty">Running both paths…</div>';
+    openDrawer('compare');
+
+    try {
+        const resp = await fetch('/api/compare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: prompt }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+            compareGrid.innerHTML =
+                `<div class="drawer-empty">${escapeHtml(data.error || 'Comparison failed.')}</div>`;
+            if (data.needs_setup) setTimeout(openSettings, 800);
+            return;
+        }
+        renderCompare(data);
+    } catch (e) {
+        console.error('Compare failed:', e);
+        compareGrid.innerHTML = '<div class="drawer-empty">Network error running the comparison.</div>';
+    }
+}
+
+function renderCompare(data) {
+    compareGrid.innerHTML = '';
+
+    const column = (title, sub, run, guarded) => {
+        const col = document.createElement('div');
+        col.className = 'compare-col' + (guarded ? ' guarded' : ' unguarded');
+
+        const blocked = !!run.blocked;
+        const verdictText = blocked
+            ? `Blocked on ${run.block_type === 'input' ? 'input' : 'output'}`
+            : run.error ? 'Provider error' : 'Delivered';
+
+        col.innerHTML = `
+            <div class="compare-col-head">
+                <span class="compare-col-title">${escapeHtml(title)}</span>
+                <span class="compare-col-sub">${escapeHtml(sub)}</span>
+                <span class="compare-verdict ${blocked ? 'blocked' : 'allowed'}">${escapeHtml(verdictText)}</span>
+            </div>`;
+
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'compare-col-body';
+        if (blocked) {
+            bodyEl.innerHTML =
+                '<div class="compare-blocked">AIDR stopped this turn — no model output was returned to the user.</div>';
+        } else if (run.error) {
+            bodyEl.innerHTML = `<div class="verdict-warning">${escapeHtml(run.error)}</div>`;
+        } else {
+            bodyEl.innerHTML = formatMessage(run.response || '');
+            enhanceCodeBlocks(bodyEl);
+        }
+        col.appendChild(bodyEl);
+
+        if (guarded) {
+            [run.aidr_input, run.aidr_output].forEach(a => {
+                const panel = buildVerdictPanel(a, { open: blocked });
+                if (panel) col.appendChild(panel);
+            });
+        }
+        if (run.usage) {
+            const u = document.createElement('div');
+            u.className = 'msg-usage standalone';
+            u.textContent = formatUsage(run.usage);
+            col.appendChild(u);
+        }
+        return col;
+    };
+
+    compareGrid.appendChild(column(
+        'AIDR ON', `${data.provider} · ${data.model}`, data.guarded, true
+    ));
+    compareGrid.appendChild(column(
+        'AIDR OFF', `${data.provider} · ${data.model}`, data.unguarded, false
+    ));
+}
+
+// ============================================================
+// Export transcript
+// ============================================================
+function exportTranscript() {
+    if (!activeChatId) {
+        showAidrError('Nothing to export yet — start a conversation first.');
+        return;
+    }
+    window.location.href = `/api/chats/${activeChatId}/export`;
+}
+
+// ============================================================
+// Token / cost counter
+// ============================================================
+function resetUsage() {
+    sessionUsage = { input_tokens: 0, output_tokens: 0, cost_usd: 0, priced: false };
+    renderUsage();
+}
+
+function addUsage(usage) {
+    if (!usage) return;
+    sessionUsage.input_tokens += usage.input_tokens || 0;
+    sessionUsage.output_tokens += usage.output_tokens || 0;
+    if (typeof usage.cost_usd === 'number') {
+        sessionUsage.cost_usd += usage.cost_usd;
+        sessionUsage.priced = true;
+    }
+    renderUsage();
+}
+
+function formatUsage(usage) {
+    const parts = [
+        `${(usage.input_tokens || 0).toLocaleString()} in`,
+        `${(usage.output_tokens || 0).toLocaleString()} out`,
+    ];
+    if (typeof usage.cost_usd === 'number') {
+        parts.push(`$${usage.cost_usd < 0.01 ? usage.cost_usd.toFixed(4) : usage.cost_usd.toFixed(2)}`);
+    }
+    return parts.join(' · ');
+}
+
+function renderUsage() {
+    if (!usageIndicator) return;
+    const { input_tokens, output_tokens, cost_usd, priced } = sessionUsage;
+    if (!input_tokens && !output_tokens) {
+        usageIndicator.classList.add('hidden');
+        usageIndicator.textContent = '';
+        return;
+    }
+    const total = input_tokens + output_tokens;
+    let text = `${total.toLocaleString()} tokens`;
+    if (priced) {
+        text += ` · $${cost_usd < 0.01 ? cost_usd.toFixed(4) : cost_usd.toFixed(2)}`;
+    }
+    usageIndicator.textContent = text;
+    usageIndicator.title =
+        `${input_tokens.toLocaleString()} input · ${output_tokens.toLocaleString()} output` +
+        (priced ? '' : ' — no published rate for this model, cost not shown');
+    usageIndicator.classList.remove('hidden');
 }

@@ -198,6 +198,13 @@
                     </svg>
                 </button>
             </div>
+            <div class="sidebar-search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="search" id="chatSearchInput" placeholder="Search chats…" aria-label="Search chat history" autocomplete="off">
+            </div>
             <div class="sidebar-content" id="sidebarContent">
                 <!-- Chat history will be loaded here via JS -->
             </div>
@@ -235,6 +242,35 @@
                         </svg>
                     </div>
                     <span id="aidrText">AIDR Disabled</span>
+                </button>
+                <button class="header-btn demo-btn" id="redteamBtn" title="Red-team prompt library" aria-label="Open red-team prompt library" aria-expanded="false">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <circle cx="12" cy="12" r="4"></circle>
+                        <line x1="12" y1="2" x2="12" y2="6"></line>
+                        <line x1="12" y1="18" x2="12" y2="22"></line>
+                        <line x1="2" y1="12" x2="6" y2="12"></line>
+                        <line x1="18" y1="12" x2="22" y2="12"></line>
+                    </svg>
+                </button>
+                <button class="header-btn demo-btn" id="activityBtn" title="AIDR activity timeline" aria-label="Open AIDR activity timeline" aria-expanded="false">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                    </svg>
+                    <span class="activity-count hidden" id="activityCount">0</span>
+                </button>
+                <button class="header-btn demo-btn" id="compareBtn" title="Compare with AIDR on vs off" aria-label="Compare the current prompt with AIDR on versus off">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="4" width="7" height="16" rx="1"></rect>
+                        <rect x="14" y="4" width="7" height="16" rx="1"></rect>
+                    </svg>
+                </button>
+                <button class="header-btn demo-btn" id="exportBtn" title="Export transcript as Markdown" aria-label="Export this chat as a Markdown transcript">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
                 </button>
                 <button class="header-btn" id="themeToggleBtn" title="Toggle Light/Dark Theme">
                     <svg class="icon-moon hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -286,7 +322,7 @@
         </div>
 
         <!-- Messages Area -->
-        <div class="chat-messages" id="chatMessages">
+        <div class="chat-messages" id="chatMessages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversation">
             <!-- Welcome message -->
             <div class="welcome-screen" id="welcomeScreen">
                 <div class="welcome-icon">
@@ -385,7 +421,8 @@
                 </button>
             </div>
             <div class="input-footer">
-                <span class="provider-indicator" id="providerIndicator">OpenAI · gpt-4o-mini</span>
+                <span class="provider-indicator" id="providerIndicator">OpenAI · gpt-5-mini</span>
+                <span class="usage-indicator hidden" id="usageIndicator" title="Tokens used in this chat"></span>
                 <span class="aidr-indicator" id="aidrIndicator">
                     <span class="aidr-dot"></span>
                     <span id="aidrIndicatorText">AIDR Active</span>
@@ -393,6 +430,82 @@
             </div>
         </div>
     </div>
+    </div>
+
+    <!-- ============================================================
+         AIDR Activity Timeline (right drawer)
+         ============================================================ -->
+    <div class="drawer-overlay" id="activityOverlay"></div>
+    <aside class="side-drawer" id="activityPanel" role="dialog" aria-modal="false" aria-labelledby="activityPanelTitle" aria-hidden="true">
+        <div class="drawer-header">
+            <h2 id="activityPanelTitle">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                AIDR Activity
+            </h2>
+            <button class="settings-close" id="activityClose" aria-label="Close AIDR activity panel">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="drawer-stats" id="activityStats"></div>
+        <div class="drawer-body" id="activityList">
+            <div class="drawer-empty">No guarded turns yet. Send a message with AIDR enabled to populate the timeline.</div>
+        </div>
+    </aside>
+
+    <!-- ============================================================
+         Red-Team Prompt Library (right drawer)
+         ============================================================ -->
+    <div class="drawer-overlay" id="redteamOverlay"></div>
+    <aside class="side-drawer" id="redteamPanel" role="dialog" aria-modal="false" aria-labelledby="redteamPanelTitle" aria-hidden="true">
+        <div class="drawer-header">
+            <h2 id="redteamPanelTitle">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <circle cx="12" cy="12" r="4"></circle>
+                </svg>
+                Red-Team Library
+            </h2>
+            <button class="settings-close" id="redteamClose" aria-label="Close red-team prompt library">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <p class="drawer-note">
+            Synthetic prompts for exercising each AIDR detector family. Click to load
+            into the composer, or <strong>Send</strong> to fire it immediately.
+        </p>
+        <div class="drawer-body" id="redteamList"></div>
+    </aside>
+
+    <!-- ============================================================
+         A/B Compare (AIDR on vs off)
+         ============================================================ -->
+    <div class="modal-overlay" id="compareOverlay"></div>
+    <div class="compare-modal" id="comparePanel" role="dialog" aria-modal="true" aria-labelledby="comparePanelTitle" aria-hidden="true">
+        <div class="drawer-header">
+            <h2 id="comparePanelTitle">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="7" height="16" rx="1"></rect>
+                    <rect x="14" y="4" width="7" height="16" rx="1"></rect>
+                </svg>
+                AIDR On vs Off
+            </h2>
+            <button class="settings-close" id="compareClose" aria-label="Close comparison">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+        <div class="compare-prompt" id="comparePrompt"></div>
+        <div class="compare-grid" id="compareGrid"></div>
     </div>
 
     <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
