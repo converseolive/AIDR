@@ -1936,9 +1936,16 @@ const VERDICT_LABELS = {
     aidr_unavailable: 'Guard not configured',
 };
 
+function allDetectors(aidr) {
+    return (aidr && Array.isArray(aidr.detectors) ? aidr.detectors : []).filter(Boolean);
+}
+
+/**
+ * Only detectors AIDR positively reported as triggered. `detected === null`
+ * means the verdict couldn't be read, which is not the same as fired.
+ */
 function firedDetectors(aidr) {
-    return (aidr && Array.isArray(aidr.detectors) ? aidr.detectors : [])
-        .filter(d => d && d.detected);
+    return allDetectors(aidr).filter(d => d.detected === true);
 }
 
 /**
@@ -1949,13 +1956,14 @@ function buildVerdictPanel(aidr, opts = {}) {
     if (!aidr || !aidr.status) return null;
     if (aidr.status === 'aidr_unavailable') return null;
 
+    const detectors = allDetectors(aidr);
     const fired = firedDetectors(aidr);
     const isBlocked = aidr.status === 'blocked';
     const isError = aidr.status === 'aidr_error';
 
     // A clean pass with no detectors, no redaction and no timing has nothing
     // to disclose — don't clutter every message with an empty panel.
-    if (!isBlocked && !isError && !fired.length && !aidr.transformed
+    if (!isBlocked && !isError && !detectors.length && !aidr.transformed
         && aidr.latency_ms === undefined) {
         return null;
     }
@@ -1973,8 +1981,14 @@ function buildVerdictPanel(aidr, opts = {}) {
     bits.push(`<span class="verdict-label">AIDR ${escapeHtml(aidr.event_type || 'guard')}</span>`);
     bits.push(`<span class="verdict-status">${escapeHtml(VERDICT_LABELS[aidr.status] || aidr.status)}</span>`);
     if (aidr.transformed) bits.push('<span class="verdict-chip warn">Redacted</span>');
-    if (fired.length) {
-        bits.push(`<span class="verdict-chip">${fired.length} detector${fired.length === 1 ? '' : 's'}</span>`);
+    if (detectors.length) {
+        // "1 of 8 fired" — the count of triggers against the roster the policy
+        // actually evaluated, not just a count of rows.
+        const cls = fired.length ? 'verdict-chip danger' : 'verdict-chip';
+        bits.push(`<span class="${cls}">${fired.length} of ${detectors.length} fired</span>`);
+    }
+    if (aidr.detectors_unknown) {
+        bits.push('<span class="verdict-chip warn">verdict unread</span>');
     }
     if (aidr.latency_ms !== undefined && aidr.latency_ms !== null) {
         bits.push(`<span class="verdict-latency">${aidr.latency_ms} ms</span>`);
@@ -2003,8 +2017,18 @@ function buildVerdictPanel(aidr, opts = {}) {
             </div>`;
     }
 
-    if (fired.length) {
-        const rows = fired.map(d => {
+    if (detectors.length) {
+        // Show the whole roster the policy evaluated, triggered ones first, so
+        // the trigger stands out against everything that came back clean.
+        const rank = d => (d.detected === true ? 0 : d.detected === null ? 1 : 2);
+        const ordered = [...detectors].sort((a, b) => rank(a) - rank(b));
+
+        const rows = ordered.map(d => {
+            const state = d.detected === true ? 'true'
+                : d.detected === false ? 'false' : 'unknown';
+            const badge = d.detected === true ? 'TRUE'
+                : d.detected === false ? 'FALSE' : '?';
+
             const meta = [];
             if (d.confidence !== null && d.confidence !== undefined) {
                 const pct = typeof d.confidence === 'number' && d.confidence <= 1
@@ -2017,28 +2041,45 @@ function buildVerdictPanel(aidr, opts = {}) {
                     .map(e => `<span class="entity-chip">${escapeHtml(e)}</span>`)
                     .join(''));
             }
-            const detail = d.detail
+            // Only annotate the rows that carry real detail — a clean detector
+            // shouldn't get a wall of text next to it.
+            const detail = (d.detected === true && d.detail)
                 ? `<div class="detector-detail">${escapeHtml(d.detail)}</div>`
                 : '';
             return `
-                <li class="detector-item">
+                <li class="detector-item state-${state}">
                     <div class="detector-head">
+                        <span class="detector-flag">${badge}</span>
                         <code class="detector-name">${escapeHtml(d.name)}</code>
                         ${meta.join('')}
                     </div>
                     ${detail}
                 </li>`;
         }).join('');
+
         body.innerHTML += `
             <div class="verdict-row column">
-                <span class="verdict-key">Detectors fired</span>
+                <span class="verdict-key">Detectors</span>
                 <ul class="detector-list">${rows}</ul>
             </div>`;
     } else if (!isError) {
         body.innerHTML += `
             <div class="verdict-row">
                 <span class="verdict-key">Detectors</span>
-                <span class="verdict-val muted">None fired</span>
+                <span class="verdict-val muted">None reported</span>
+            </div>`;
+    }
+
+    // Be explicit when a verdict couldn't be read, and show the field names
+    // AIDR did return so the parser can be mapped to this tenant's shape.
+    if (aidr.parse_warning) {
+        const keys = (aidr.observed_keys || []).map(k =>
+            `<span class="entity-chip">${escapeHtml(k)}</span>`).join('');
+        body.innerHTML += `
+            <div class="verdict-warning">
+                ${escapeHtml(aidr.parse_warning)}
+                Those rows show <code>?</code> rather than a guessed verdict.
+                ${keys ? `<div class="verdict-keys">Fields returned: ${keys}</div>` : ''}
             </div>`;
     }
 
@@ -2208,6 +2249,7 @@ function renderActivity() {
         item.className = 'activity-item status-' + (e.status || 'unknown');
 
         const fired = firedDetectors(e).map(d => d.name);
+        const total = allDetectors(e).length;
         const time = e.ts ? new Date(e.ts).toLocaleTimeString() : '—';
 
         item.innerHTML = `
@@ -2221,7 +2263,7 @@ function renderActivity() {
                 ${e.policy ? `<span class="verdict-chip">${escapeHtml(e.policy)}</span>` : ''}
                 ${fired.length
                     ? fired.map(n => `<span class="entity-chip">${escapeHtml(n)}</span>`).join('')
-                    : '<span class="verdict-val muted">no detectors</span>'}
+                    : `<span class="verdict-val muted">${total ? `0 of ${total} fired` : 'no detectors'}</span>`}
                 ${e.transformed ? '<span class="verdict-chip warn">redacted</span>' : ''}
                 ${typeof e.latency_ms === 'number' ? `<span class="activity-time">${e.latency_ms} ms</span>` : ''}
             </div>

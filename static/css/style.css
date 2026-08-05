@@ -3030,3 +3030,86 @@ mark.diff-added {
     outline: 2px solid var(--accent-primary);
     outline-offset: 2px;
 }
+
+/* ============================================================
+   Detector verdicts — full roster with an explicit true/false
+   ============================================================ */
+
+/* Base row is now neutral; state classes below carry the meaning. */
+.detector-item {
+    border-left-color: var(--border-subtle);
+    transition: opacity var(--transition-fast);
+}
+
+.detector-flag {
+    flex-shrink: 0;
+    min-width: 44px;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-align: center;
+}
+
+/* Triggered — the row that matters */
+.detector-item.state-true {
+    border-left-color: var(--danger);
+    background: var(--surface-3);
+}
+
+.detector-item.state-true .detector-flag {
+    background: var(--danger);
+    color: #fff;
+}
+
+.detector-item.state-true .detector-name {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+/* Evaluated and clean — present for context, visually recessed */
+.detector-item.state-false {
+    border-left-color: var(--border-subtle);
+    background: transparent;
+    opacity: 0.55;
+}
+
+.detector-item.state-false .detector-flag {
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+}
+
+.detector-item.state-false .detector-name {
+    color: var(--text-muted);
+}
+
+.detector-item.state-false:hover { opacity: 0.9; }
+
+/* Verdict could not be read from the response */
+.detector-item.state-unknown {
+    border-left-color: var(--warning);
+    background: transparent;
+}
+
+.detector-item.state-unknown .detector-flag {
+    background: transparent;
+    border: 1px solid var(--warning);
+    color: var(--warning);
+}
+
+.detector-item.state-unknown .detector-name { color: var(--warning); }
+
+.verdict-chip.danger {
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.verdict-keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}

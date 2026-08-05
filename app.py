@@ -541,6 +541,118 @@ def _to_plain(value, _depth=0):
     return str(value)
 
 
+# Words a string-valued verdict field may use. Getting this wrong in the
+# "fired" direction makes an entire policy roster look like it triggered, so
+# anything not listed here resolves to None (unknown) rather than True.
+_VERDICT_TRUE = {
+    "true", "detected", "detect", "fail", "failed", "failure", "block",
+    "blocked", "violation", "violated", "hit", "flag", "flagged", "positive",
+    "yes", "trigger", "triggered", "match", "matched", "unsafe", "1",
+}
+_VERDICT_FALSE = {
+    "false", "not_detected", "undetected", "pass", "passed", "allow",
+    "allowed", "clean", "none", "ok", "no", "negative", "safe", "no_match",
+    "not_triggered", "0", "na", "n/a", "", "null",
+}
+# Keys whose truthiness means "fired", and keys whose truthiness means "clean".
+_VERDICT_KEYS_DIRECT = (
+    "detected", "triggered", "matched", "is_detected", "fired", "flagged",
+    "violated", "hit", "is_violation",
+)
+_VERDICT_KEYS_INVERTED = ("passed", "pass", "clean", "allowed", "is_safe", "safe")
+_VERDICT_KEYS_STRING = (
+    "result", "status", "outcome", "verdict", "decision", "action", "state",
+)
+
+
+_shape_logged = False
+
+
+def log_once_detector_shape(raw, seen_keys):
+    """
+    Print the detector payload's structure once per process when a verdict
+    can't be read. Field names and value *types* only — no message content —
+    so it's safe to paste from a console when mapping a new response shape.
+    """
+    global _shape_logged
+    if _shape_logged:
+        return
+    _shape_logged = True
+    data = _to_plain(raw)
+    print("[AIDR] Could not read detector verdicts. Response shape:")
+    print(f"[AIDR]   detectors is a {type(data).__name__}")
+    if isinstance(data, dict):
+        for name, payload in list(data.items())[:3]:
+            if isinstance(payload, dict):
+                fields = ", ".join(
+                    f"{k}: {type(v).__name__}" for k, v in payload.items()
+                )
+                print(f"[AIDR]   {name} -> {{{fields}}}")
+            else:
+                print(f"[AIDR]   {name} -> {type(payload).__name__}")
+    elif isinstance(data, list) and data:
+        print(f"[AIDR]   first item: {type(data[0]).__name__}")
+        if isinstance(data[0], dict):
+            print("[AIDR]   fields: " + ", ".join(
+                f"{k}: {type(v).__name__}" for k, v in data[0].items()))
+    print(f"[AIDR]   all field names seen: {seen_keys}")
+    print("[AIDR]   Set AIDR_DEBUG=1 to include the full payload in the API "
+          "response for inspection.")
+
+
+def _detector_verdict(payload):
+    """
+    Resolve one detector's verdict: True (fired), False (evaluated and clean),
+    or None (shape not recognised).
+
+    Deliberately conservative. AIDR returns an entry for every detector the
+    policy evaluates, so defaulting an unrecognised payload to True would
+    report the whole roster as fired — which is exactly the bug this replaces.
+    Unknown stays unknown and the UI labels it as such.
+    """
+    if isinstance(payload, bool):
+        return payload
+    if payload is None:
+        return None
+    if isinstance(payload, (int, float)):
+        return bool(payload)
+    if isinstance(payload, str):
+        s = payload.strip().lower()
+        if s in _VERDICT_TRUE:
+            return True
+        if s in _VERDICT_FALSE:
+            return False
+        return None
+    if isinstance(payload, (list, tuple)):
+        # A list of matches/spans: non-empty means something was found.
+        return len(payload) > 0
+    if isinstance(payload, dict):
+        for key in _VERDICT_KEYS_DIRECT:
+            if key in payload:
+                v = _detector_verdict(payload[key])
+                if v is not None:
+                    return v
+        for key in _VERDICT_KEYS_INVERTED:
+            if key in payload:
+                v = _detector_verdict(payload[key])
+                if v is not None:
+                    return not v
+        for key in _VERDICT_KEYS_STRING:
+            if key in payload:
+                v = _detector_verdict(payload[key])
+                if v is not None:
+                    return v
+        # No verdict field, but a populated match list implies a detection.
+        for key in ("entities", "matches", "spans", "findings", "detections"):
+            found = payload.get(key)
+            if isinstance(found, (list, tuple)):
+                return len(found) > 0
+        # An empty payload for an enumerated detector means "nothing to report".
+        if not payload:
+            return False
+    return None
+
+
 def _normalize_detectors(raw):
     """
     Flatten AIDR's detector payload into a list of
@@ -553,28 +665,31 @@ def _normalize_detectors(raw):
     data = _to_plain(raw)
     detectors = []
 
-    def add(name, payload):
+    def add(name, payload, assume=None):
+        verdict = _detector_verdict(payload)
+        if verdict is None:
+            verdict = assume
         entry = {
             "name": str(name),
-            "detected": True,
+            # True = fired, False = evaluated and clean, None = couldn't tell.
+            "detected": verdict,
             "confidence": None,
             "entities": [],
             "detail": None,
+            "keys": [],
         }
         if isinstance(payload, dict):
-            for key in ("detected", "triggered", "matched", "is_detected"):
-                if key in payload:
-                    entry["detected"] = bool(payload[key])
-                    break
-            for key in ("confidence", "score", "probability"):
-                if payload.get(key) is not None:
+            entry["keys"] = sorted(str(k) for k in payload)
+            for key in ("confidence", "score", "probability", "severity"):
+                if payload.get(key) is not None and not isinstance(payload[key], (dict, list)):
                     entry["confidence"] = payload[key]
                     break
-            for key in ("entities", "entity_types", "matches", "types", "categories"):
+            for key in ("entities", "entity_types", "matches", "types",
+                        "categories", "spans", "findings", "detections"):
                 found = payload.get(key)
                 if isinstance(found, list):
                     entry["entities"] = [
-                        e if isinstance(e, str) else json.dumps(e, default=str)
+                        e if isinstance(e, str) else json.dumps(e, default=str)[:120]
                         for e in found
                     ]
                     break
@@ -586,12 +701,14 @@ def _normalize_detectors(raw):
                     entry["detail"] = payload[key]
                     break
         elif isinstance(payload, bool):
-            entry["detected"] = payload
+            pass  # verdict already resolved from the bool
         elif payload is not None:
             entry["detail"] = str(payload)[:400]
         detectors.append(entry)
 
     if isinstance(data, dict):
+        # name -> payload. AIDR enumerates every detector the policy evaluates,
+        # so an unresolvable verdict must NOT default to fired.
         for name, payload in data.items():
             add(name, payload)
     elif isinstance(data, list):
@@ -606,13 +723,13 @@ def _normalize_detectors(raw):
                 )
                 add(name, item)
             else:
-                add(str(item), True)
+                # A bare list of names is the "only detections are listed"
+                # convention, so an entry here does mean it fired.
+                add(str(item), None, assume=True)
     elif data is not None:
         add("detector", str(data))
 
-    # Only surface detectors that actually fired — AIDR enumerates all of them.
-    fired = [d for d in detectors if d["detected"]]
-    return fired or detectors
+    return detectors
 
 
 def _extract_text(messages):
@@ -698,7 +815,8 @@ def aidr_guard(messages, event_type):
 
         is_blocked = bool(getattr(result, "blocked", False))
         policy = getattr(result, "policy", None)
-        detectors = _normalize_detectors(getattr(result, "detectors", None))
+        raw_detectors = getattr(result, "detectors", None)
+        detectors = _normalize_detectors(raw_detectors)
         transformed = bool(getattr(result, "transformed", False))
 
         original_text = _extract_text(messages)
@@ -713,10 +831,28 @@ def aidr_guard(messages, event_type):
             "latency_ms": latency_ms,
             "policy": policy or ("Policy violation detected" if is_blocked else None),
             "detectors": detectors,
+            "detectors_total": len(detectors),
+            "detectors_fired": sum(1 for d in detectors if d["detected"] is True),
+            "detectors_unknown": sum(1 for d in detectors if d["detected"] is None),
             "transformed": transformed,
             "redacted": redacted,
             "guard_output": guard_output if transformed else None,
         }
+
+        # If any detector's verdict couldn't be resolved, say so and report the
+        # field names we did see, rather than silently guessing a verdict.
+        if details["detectors_unknown"]:
+            seen_keys = sorted({k for d in detectors for k in d.get("keys") or []})
+            details["parse_warning"] = (
+                f"{details['detectors_unknown']} of {len(detectors)} detector "
+                "verdicts could not be read from the AIDR response."
+            )
+            details["observed_keys"] = seen_keys
+            log_once_detector_shape(raw_detectors, seen_keys)
+
+        # Opt-in raw payload, for mapping an unfamiliar response shape.
+        if os.getenv("AIDR_DEBUG", "").strip().lower() in ("1", "true", "yes"):
+            details["raw_detectors"] = _to_plain(raw_detectors)
         return is_blocked, details
     except Exception as e:
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -1696,9 +1832,12 @@ def export_chat(chat_id):
             bits = [f"status `{status}`"]
             if aidr.get("policy"):
                 bits.append(f"policy `{aidr['policy']}`")
-            fired = [d["name"] for d in aidr.get("detectors") or [] if d.get("detected")]
+            dets = aidr.get("detectors") or []
+            fired = [d["name"] for d in dets if d.get("detected") is True]
+            if dets:
+                bits.append(f"{len(fired)}/{len(dets)} detectors fired")
             if fired:
-                bits.append("detectors " + ", ".join(f"`{n}`" for n in fired))
+                bits.append(", ".join(f"`{n}`" for n in fired))
             if aidr.get("transformed"):
                 bits.append("**content redacted by AIDR**")
             if aidr.get("latency_ms") is not None:
@@ -1713,7 +1852,7 @@ def export_chat(chat_id):
                   "| --- | --- | --- | --- | --- | --- |"]
         for e in events:
             fired = ", ".join(
-                d["name"] for d in e.get("detectors") or [] if d.get("detected")
+                d["name"] for d in e.get("detectors") or [] if d.get("detected") is True
             ) or "—"
             lines.append(
                 f"| {e.get('ts', '—')} | {e.get('phase', '—')} "
