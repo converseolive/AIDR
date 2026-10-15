@@ -15,6 +15,8 @@ const providerIndicator = document.getElementById('providerIndicator');
 const personaBadge = document.getElementById('personaBadge');
 const aidrBadge = document.getElementById('aidrBadge');
 const aidrText = document.getElementById('aidrText');
+const toolsBadge = document.getElementById('toolsBadge');
+const toolsText = document.getElementById('toolsText');
 
 // Sidebar
 const chatSidebar = document.getElementById('chatSidebar');
@@ -100,6 +102,7 @@ const usageIndicator = document.getElementById('usageIndicator');
 let isWaiting = false;
 let selectedFile = null; // Store raw File object
 let isAidrEnabled = false;
+let isToolsEnabled = false;
 let isAidrConfigured = false;
 let hasApiKey = false;
 let activeChatId = null;
@@ -127,6 +130,7 @@ const LS_KEYS = {
     MODEL: 'aidr_app_model',
     PERSONA: 'aidr_app_persona',
     OLLAMA_URL: 'aidr_app_ollama_url',
+    TOOLS: 'aidr_app_tools',
 };
 
 const PERSONA_HINTS = {
@@ -345,6 +349,19 @@ function setupEventListeners() {
         });
     }
 
+    // Toggle demo tools (Anthropic tool calling, guarded by AIDR tool events)
+    if (toolsBadge) {
+        toolsBadge.addEventListener('click', () => {
+            if (!isToolsEnabled && currentProvider() !== 'anthropic') {
+                showAidrError('Demo tools only run with the Anthropic provider. Switch provider in Settings, then enable tools.');
+                openSettings();
+                return;
+            }
+            setToolsState(!isToolsEnabled);
+        });
+        setToolsState(localStorage.getItem(LS_KEYS.TOOLS) === 'true', { persist: false });
+    }
+
     // Sidebar Toggles
     if (sidebarToggleBtn) {
         sidebarToggleBtn.addEventListener('click', () => {
@@ -509,6 +526,29 @@ function showAidrError(message) {
 // ============================================================
 // Settings
 // ============================================================
+function currentProvider() {
+    return (providerSelect && providerSelect.value)
+        || localStorage.getItem(LS_KEYS.PROVIDER)
+        || 'openai';
+}
+
+/**
+ * Demo tools toggle. Tool calling is wired for the Anthropic provider only
+ * in this slice; the server ignores the flag for other providers and says
+ * so in the response, which sendMessage surfaces as a toast.
+ */
+function setToolsState(on, { persist = true } = {}) {
+    isToolsEnabled = !!on;
+    if (toolsBadge) {
+        toolsBadge.classList.toggle('tools-off', !isToolsEnabled);
+        toolsBadge.setAttribute('aria-pressed', isToolsEnabled ? 'true' : 'false');
+    }
+    if (toolsText) toolsText.textContent = isToolsEnabled ? 'Tools On' : 'Tools Off';
+    if (persist) {
+        try { localStorage.setItem(LS_KEYS.TOOLS, String(isToolsEnabled)); } catch (e) { /* ignore */ }
+    }
+}
+
 async function checkAidrStatus() {
     try {
         const resp = await fetch('/api/aidr-status');
@@ -931,7 +971,7 @@ function sendMessage(overrideText) {
                 addUsage(data.usage);
 
                 if (data.blocked) {
-                    appendBlockedMessage(data.message, data.block_type, data.aidr);
+                    appendBlockedMessage(data.message, data.block_type, data.aidr, data.tool_calls);
                 } else {
                     // Redaction happens on the request side, so surface the
                     // input verdict as its own notice above the reply.
@@ -940,7 +980,11 @@ function sendMessage(overrideText) {
                     appendMessage('assistant', data.response, null, {
                         aidr: data.aidr_output,
                         usage: data.usage,
+                        tool_calls: data.tool_calls,
                     });
+                }
+                if (isToolsEnabled && data.tools_active === false) {
+                    showAidrError('Demo tools were skipped: they only run with the Anthropic provider.');
                 }
             } catch(e) {
                 console.error('Failed to render chat response:', e);
@@ -977,6 +1021,7 @@ function sendMessage(overrideText) {
     const formData = new FormData();
     formData.append('message', message);
     formData.append('aidr_enabled', isAidrEnabled);
+    formData.append('tools_enabled', isToolsEnabled);
     if (activeChatId) {
         formData.append('chat_id', activeChatId);
     }
@@ -1072,7 +1117,13 @@ function appendMessage(role, content, attachment = null, meta = {}) {
         `;
         contentEl.innerHTML += attachHtml;
     }
-    
+
+    // Tool calls the model made on this turn, each with its AIDR verdicts.
+    // They come before the text because that's the order they happened in.
+    if (Array.isArray(meta.tool_calls) && meta.tool_calls.length) {
+        contentEl.appendChild(buildToolCallList(meta.tool_calls));
+    }
+
     if (content) {
         const textWrapper = document.createElement('div');
         textWrapper.className = 'message-text';
@@ -1173,7 +1224,7 @@ function findPreviousUserMessage(el) {
     return '';
 }
 
-function appendBlockedMessage(message, blockType, aidr = null) {
+function appendBlockedMessage(message, blockType, aidr = null, toolCalls = null) {
     const messageEl = document.createElement('div');
     messageEl.className = 'message assistant blocked';
 
@@ -1193,7 +1244,11 @@ function appendBlockedMessage(message, blockType, aidr = null) {
         </div>
     `;
 
-    contentEl.innerHTML = headerHTML + `<p>${escapeHtml(message)}</p>`;
+    // Tool calls ran before the output was judged, so they sit above the block.
+    if (Array.isArray(toolCalls) && toolCalls.length) {
+        contentEl.appendChild(buildToolCallList(toolCalls));
+    }
+    contentEl.insertAdjacentHTML('beforeend', headerHTML + `<p>${escapeHtml(message)}</p>`);
 
     // Expand the verdict by default on a block — this is the reason the
     // message never made it through, so it shouldn't need a click to see.
@@ -1808,13 +1863,15 @@ async function switchChat(id) {
                     appendBlockedMessage(
                         '⚠️ The AI response was blocked by CrowdStrike AIDR security.',
                         'output',
-                        msg.aidr
+                        msg.aidr,
+                        msg.tool_calls
                     );
                     return;
                 }
                 appendMessage(msg.role, msg.content, null, {
                     aidr: msg.aidr,
                     usage: msg.usage,
+                    tool_calls: msg.tool_calls,
                 });
                 addUsage(msg.usage);
             });
@@ -1952,6 +2009,98 @@ function firedDetectors(aidr) {
  * Collapsible AIDR verdict for one guard call. Returns null when there is
  * nothing worth showing (guard disabled, or a clean pass with no detail).
  */
+// ============================================================
+// Tool calls (Anthropic tool use, guarded by AIDR tool events)
+// ============================================================
+const TOOL_STATUS_LABELS = {
+    executed: 'Executed',
+    redacted: 'Output redacted',
+    blocked_input: 'Blocked before execution',
+    blocked_output: 'Output withheld',
+    error: 'Error',
+};
+
+function buildToolCallList(toolCalls) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tool-calls';
+    toolCalls.forEach(tc => wrap.appendChild(buildToolCallCard(tc)));
+    return wrap;
+}
+
+/**
+ * One card per tool call: the arguments the model chose, the AIDR verdict on
+ * that call, what the tool returned, the AIDR verdict on the result, and,
+ * when they differ, what the model was actually given.
+ */
+function buildToolCallCard(tc) {
+    const status = tc.status || 'executed';
+    const details = document.createElement('details');
+    details.className = 'tool-call status-' + status;
+    // Anything other than a clean run is the point of the demo, so open it.
+    details.open = status !== 'executed';
+
+    const summary = document.createElement('summary');
+    summary.innerHTML = `
+        <span class="tool-call-icon">🔧</span>
+        <span class="verdict-label">Tool call</span>
+        <code class="tool-call-name">${escapeHtml(tc.name || 'tool')}</code>
+        <span class="tool-call-status">${escapeHtml(TOOL_STATUS_LABELS[status] || status)}</span>`;
+    details.appendChild(summary);
+
+    const body = document.createElement('div');
+    body.className = 'verdict-body';
+
+    const pretty = v => {
+        if (v === null || v === undefined) return '';
+        if (typeof v === 'string') return v;
+        try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
+    };
+    const section = (label, text) => {
+        const row = document.createElement('div');
+        row.className = 'verdict-row column';
+        row.innerHTML = `<span class="verdict-key">${escapeHtml(label)}</span>
+            <pre class="tool-call-pre">${escapeHtml(text)}</pre>`;
+        return row;
+    };
+    const warning = text => {
+        const el = document.createElement('div');
+        el.className = 'verdict-warning';
+        el.textContent = text;
+        return el;
+    };
+
+    body.appendChild(section('Arguments', pretty(tc.input)));
+
+    const inVerdict = buildVerdictPanel(tc.aidr_input, { open: status === 'blocked_input' });
+    if (inVerdict) body.appendChild(inVerdict);
+
+    if (status === 'blocked_input') {
+        body.appendChild(warning('AIDR blocked this call before it ran. The tool never executed.'));
+    } else if (tc.result !== null && tc.result !== undefined) {
+        body.appendChild(section(
+            status === 'blocked_output' ? 'Raw result (withheld from the model)' : 'Result',
+            pretty(tc.result)
+        ));
+    }
+
+    const outVerdict = buildVerdictPanel(tc.aidr_output, {
+        open: status === 'blocked_output' || status === 'redacted',
+    });
+    if (outVerdict) body.appendChild(outVerdict);
+
+    if (tc.model_saw) {
+        body.appendChild(section(
+            status === 'redacted'
+                ? 'What the model received (redacted by AIDR)'
+                : 'What the model received',
+            pretty(tc.model_saw)
+        ));
+    }
+
+    details.appendChild(body);
+    return details;
+}
+
 function buildVerdictPanel(aidr, opts = {}) {
     if (!aidr || !aidr.status) return null;
     if (aidr.status === 'aidr_unavailable') return null;
@@ -2260,6 +2409,7 @@ function renderActivity() {
             </div>
             ${e.preview ? `<div class="activity-preview">${escapeHtml(e.preview)}${e.preview.length >= 160 ? '…' : ''}</div>` : ''}
             <div class="activity-meta">
+                ${e.tool ? `<span class="verdict-chip tool-chip">🔧 ${escapeHtml(e.tool)}</span>` : ''}
                 ${e.policy ? `<span class="verdict-chip">${escapeHtml(e.policy)}</span>` : ''}
                 ${fired.length
                     ? fired.map(n => `<span class="entity-chip">${escapeHtml(n)}</span>`).join('')
@@ -2370,6 +2520,7 @@ function renderRedteam(prompts) {
                     <span class="redteam-icon">${escapeHtml(p.icon || '⚠️')}</span>
                     <span class="redteam-label">${escapeHtml(p.label)}</span>
                     ${p.expect ? `<code class="redteam-expect">${escapeHtml(p.expect)}</code>` : ''}
+                    ${p.needs_tools ? '<span class="verdict-chip tool-chip" title="Needs the Tools toggle on and the Anthropic provider">🔧 needs tools</span>' : ''}
                 </div>
                 <pre class="redteam-prompt">${escapeHtml(p.prompt)}</pre>
                 <div class="redteam-actions">

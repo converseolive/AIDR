@@ -3113,3 +3113,104 @@ mark.diff-added {
     gap: 4px;
     margin-top: 6px;
 }
+
+/* --- Demo tools toggle (header) --- */
+.aidr-badge.tools-badge {
+    background: rgba(0, 243, 255, 0.08);
+    border-color: var(--border-medium);
+    color: var(--accent-primary);
+    box-shadow: 0 0 10px rgba(0, 243, 255, 0.15);
+}
+
+.aidr-badge.tools-badge:hover {
+    background: rgba(0, 243, 255, 0.14);
+    box-shadow: 0 0 15px rgba(0, 243, 255, 0.25);
+}
+
+.aidr-badge.tools-badge.tools-off {
+    background: transparent;
+    border-color: var(--border-subtle);
+    color: var(--text-muted);
+    box-shadow: none;
+}
+
+.aidr-badge.tools-badge.tools-off:hover {
+    color: var(--text-secondary);
+    border-color: var(--border-medium);
+}
+
+/* --- Tool call cards --- */
+.tool-calls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.tool-call {
+    border: 1px solid var(--border-subtle);
+    border-left-width: 3px;
+    border-radius: var(--radius-md);
+    background: var(--surface-1);
+    font-size: 12px;
+}
+
+.tool-call > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 10px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.tool-call > summary::-webkit-details-marker { display: none; }
+
+.tool-call > summary:focus-visible {
+    outline: 1px solid var(--accent-primary);
+    outline-offset: 1px;
+}
+
+.tool-call-name {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+}
+
+.tool-call-status {
+    margin-left: auto;
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.tool-call.status-executed { border-left-color: var(--success); }
+.tool-call.status-redacted { border-left-color: var(--warning); }
+.tool-call.status-redacted .tool-call-status { color: var(--warning); }
+.tool-call.status-error { border-left-color: var(--warning); }
+.tool-call.status-blocked_input,
+.tool-call.status-blocked_output { border-left-color: var(--danger); }
+.tool-call.status-blocked_input .tool-call-status,
+.tool-call.status-blocked_output .tool-call-status { color: var(--danger); }
+
+.tool-call .aidr-verdict { margin-top: 0; }
+
+.tool-call-pre {
+    margin: 4px 0 0;
+    padding: 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 240px;
+    overflow: auto;
+}
+
+.tool-chip { color: var(--accent-primary); }
