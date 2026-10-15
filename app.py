@@ -15,6 +15,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Trust the operating system's certificate store for outbound HTTPS.
+# The AIDR SDK and every LLM SDK use httpx, which by default trusts only the
+# public roots bundled in certifi. On a host where the Falcon sensor (or a lab
+# proxy) re-signs TLS traffic with its own CA, Windows/macOS trust that CA but
+# certifi does not, and every call fails with CERTIFICATE_VERIFY_FAILED.
+# truststore makes Python verify against the OS store instead. It must run
+# before any HTTP client is created.
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except ImportError:
+    print("[TLS] truststore not installed; using certifi's bundled roots only.")
+
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
 
