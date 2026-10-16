@@ -17,6 +17,7 @@ const aidrBadge = document.getElementById('aidrBadge');
 const aidrText = document.getElementById('aidrText');
 const toolsBadge = document.getElementById('toolsBadge');
 const toolsText = document.getElementById('toolsText');
+const poisonUrlInput = document.getElementById('poisonUrlInput');
 
 // Sidebar
 const chatSidebar = document.getElementById('chatSidebar');
@@ -131,6 +132,7 @@ const LS_KEYS = {
     PERSONA: 'aidr_app_persona',
     OLLAMA_URL: 'aidr_app_ollama_url',
     TOOLS: 'aidr_app_tools',
+    POISON_URL: 'aidr_app_poison_url',
 };
 
 const PERSONA_HINTS = {
@@ -690,6 +692,48 @@ async function loadSettings() {
     } catch (e) {
         console.warn('Could not load settings:', e);
     }
+    await loadDemoConfig();
+}
+
+/**
+ * Demo knobs live in server memory, so they vanish on a Flask restart. The
+ * browser keeps its own copy and re-applies it when the server comes back
+ * empty, which keeps a demo setup stable across restarts.
+ */
+async function loadDemoConfig() {
+    if (!poisonUrlInput) return;
+    let serverUrl = '';
+    try {
+        const resp = await fetch('/api/demo-config');
+        const data = await resp.json();
+        serverUrl = data.poison_url || '';
+    } catch (e) {
+        console.warn('Could not load demo config:', e);
+    }
+    const saved = localStorage.getItem(LS_KEYS.POISON_URL) || '';
+    if (!serverUrl && saved) {
+        await saveDemoConfig(saved);
+        serverUrl = saved;
+    }
+    poisonUrlInput.value = serverUrl;
+}
+
+async function saveDemoConfig(poisonUrl) {
+    try {
+        const resp = await fetch('/api/demo-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ poison_url: poisonUrl }),
+        });
+        if (resp.ok) {
+            if (poisonUrl) localStorage.setItem(LS_KEYS.POISON_URL, poisonUrl);
+            else localStorage.removeItem(LS_KEYS.POISON_URL);
+        }
+        return resp.ok;
+    } catch (e) {
+        console.warn('Could not save demo config:', e);
+        return false;
+    }
 }
 
 async function saveSettings() {
@@ -705,6 +749,11 @@ async function saveSettings() {
     // so sending an empty value would overwrite the saved key.
     if (apiKeyInput.value.trim()) {
         settings.api_key = apiKeyInput.value.trim();
+    }
+
+    // Demo knobs go to their own endpoint; an empty box clears the value.
+    if (poisonUrlInput) {
+        await saveDemoConfig(poisonUrlInput.value.trim());
     }
 
     try {

@@ -155,6 +155,23 @@
 
             <div class="settings-divider"></div>
 
+            <!-- Demo tools -->
+            <div class="settings-section">
+                <div class="settings-section-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                    </svg>
+                    Demo Tools
+                </div>
+            </div>
+            <div class="settings-group">
+                <label class="settings-label" for="poisonUrlInput">Poison URL for tool results</label>
+                <input type="text" id="poisonUrlInput" class="settings-input" placeholder="http://known-bad-domain.example/..." autocomplete="off" spellcheck="false">
+                <span class="settings-hint">Planted in Priya Natarajan's ticket notes whenever <code>lookup_customer</code> returns her record, so AIDR's <code>malicious_entity</code> detector sees it on <code>tool_output</code>. Leave blank to disable.</span>
+            </div>
+
+            <div class="settings-divider"></div>
+
             <!-- Persona Selection -->
             <div class="settings-group">
                 <label class="settings-label" for="personaSelect">Chatbot Persona</label>
