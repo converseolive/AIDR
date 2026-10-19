@@ -4,6 +4,7 @@ Flask backend with CrowdStrike AIDR guardrails and multi-provider LLM support.
 """
 
 import os
+import secrets
 import json
 import re
 import time
@@ -29,7 +30,11 @@ except ImportError:
     print("[TLS] truststore not installed; using certifi's bundled roots only.")
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
+secret_key = os.getenv("FLASK_SECRET_KEY")
+if not secret_key:
+    print("[SECURITY] ⚠️  FLASK_SECRET_KEY not found in environment. Using a random temporary key. Sessions will be invalidated on server restart.")
+    secret_key = secrets.token_hex(32)
+app.secret_key = secret_key
 
 # Cap uploads server-side so a large file can't be inlined into a prompt.
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB
