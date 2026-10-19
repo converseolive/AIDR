@@ -29,7 +29,14 @@ except ImportError:
     print("[TLS] truststore not installed; using certifi's bundled roots only.")
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
+
+# Security Fix: Remove hardcoded fallback secret key
+flask_secret = os.getenv("FLASK_SECRET_KEY")
+if not flask_secret:
+    print("[SECURITY] ⚠️  No FLASK_SECRET_KEY found. Generating a random fallback key.")
+    print("[SECURITY] ⚠️  Sessions will be invalidated when the server restarts.")
+    flask_secret = os.urandom(24).hex()
+app.secret_key = flask_secret
 
 # Cap uploads server-side so a large file can't be inlined into a prompt.
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB
