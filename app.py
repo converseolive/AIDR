@@ -8,6 +8,7 @@ import json
 import re
 import time
 import uuid
+import secrets
 import traceback
 from datetime import datetime, timezone
 from flask import Flask, Response, render_template, request, jsonify, session
@@ -29,7 +30,7 @@ except ImportError:
     print("[TLS] truststore not installed; using certifi's bundled roots only.")
 
 app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
+app.secret_key = os.getenv("FLASK_SECRET_KEY", secrets.token_hex(32))
 
 # Cap uploads server-side so a large file can't be inlined into a prompt.
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB
