@@ -9,6 +9,11 @@ import re
 import time
 import uuid
 import traceback
+import urllib.parse
+import socket
+import ipaddress
+import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from flask import Flask, Response, render_template, request, jsonify, session
 from dotenv import load_dotenv
@@ -34,6 +39,44 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-key-change-me")
 # Cap uploads server-side so a large file can't be inlined into a prompt.
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024  # 5 MB
 MAX_ATTACHMENT_CHARS = 200_000
+
+# ---------------------------------------------------------------------------
+# Security Helpers
+# ---------------------------------------------------------------------------
+def is_safe_url(url, allow_private=False):
+    """Validate URLs to prevent SSRF."""
+    if not url:
+        return True
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        if not parsed.hostname:
+            return False
+
+        executor = ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(socket.getaddrinfo, parsed.hostname, None)
+        try:
+            addr_info = future.result(timeout=2.0)
+        except Exception:
+            return False
+        finally:
+            if sys.version_info >= (3, 9):
+                executor.shutdown(wait=False, cancel_futures=True)
+            else:
+                executor.shutdown(wait=False)
+
+        for info in addr_info:
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_unspecified or ip.is_multicast:
+                return False
+            if str(ip) in ("169.254.169.254", "fd00:ec2::254"):
+                return False
+            if not allow_private and (ip.is_private or ip.is_loopback):
+                return False
+        return True
+    except Exception:
+        return False
 
 # ---------------------------------------------------------------------------
 # AIDR Client Setup
@@ -1233,6 +1276,9 @@ def aidr_config():
     if not base_url:
         base_url = os.getenv("AIDR_BASE_URL", "https://api.us-2.crowdstrike.com/aidr/aiguard")
 
+    if not is_safe_url(base_url, allow_private=False):
+        return jsonify({"error": "Invalid base_url: Cannot connect to internal or unsupported addresses."}), 400
+
     try:
         from crowdstrike_aidr import AIGuard
         aidr_client = AIGuard(
@@ -1274,6 +1320,8 @@ def save_settings():
     if "api_key" in data and data["api_key"].strip():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
+        if not is_safe_url(data["ollama_url"], allow_private=True):
+            return jsonify({"error": "Invalid ollama_url: Contains unsupported or dangerous address."}), 400
         session["ollama_url"] = data["ollama_url"]
 
     return jsonify({"status": "ok"})
