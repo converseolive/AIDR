@@ -1,0 +1,4 @@
+## 2025-02-28 - SSRF in User-Configurable URLs (ollama_url, AIDR_BASE_URL)
+**Vulnerability:** User-configurable URLs for internal services like Ollama and AIDR Base URL were unvalidated, allowing an attacker to submit internal IPs or metadata server endpoints (e.g., 169.254.169.254) resulting in Server-Side Request Forgery (SSRF).
+**Learning:** Preventing SSRF via DNS resolution typically uses timeouts to avoid DoS. However, using `socket.setdefaulttimeout()` mutates the global Python socket state, creating a severe side effect for the entire application.
+**Prevention:** Always validate configurable URLs by checking the scheme, resolving the hostname to ensure it is not a private, loopback, or multicast IP, and use localized timeout mechanisms (e.g., `concurrent.futures.ThreadPoolExecutor`) for DNS resolution to avoid global state pollution.
