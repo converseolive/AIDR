@@ -1,0 +1,4 @@
+## 2025-02-24 - SSRF Mitigation in URL Configuration
+**Vulnerability:** User-configurable URLs (`ollama_url` and AIDR `base_url`) were completely unvalidated, leading to Server-Side Request Forgery (SSRF) and potential metadata leakage or internal network pivoting.
+**Learning:** It's critical to parse schemes, extract hostnames, manually perform DNS resolution using timeouts, and validate the resulting IPs against specific `ipaddress` flags (`is_unspecified`, `is_multicast`, `is_link_local`, `is_private`, `is_loopback`) prior to using the URLs. Doing this strictly using blocking I/O context managers can lead to Thread DoS attacks.
+**Prevention:** Validate all configurable URLs directly before HTTP consumption using defensive resolution patterns with proper execution shutdown (like `executor.shutdown(wait=False, cancel_futures=True)`).
