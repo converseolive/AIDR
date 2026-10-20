@@ -2415,58 +2415,284 @@ mark.diff-added {
     gap: 4px;
 }
 
-/* --- Red-team cards --- */
-.redteam-card {
-    padding: 12px;
-    background: var(--surface-1);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
+/* ============================================================
+   Scenario runner
+   ============================================================ */
+.scenario-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.98);
+    width: min(1180px, 94vw);
+    height: min(860px, 90vh);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity var(--transition-normal), transform var(--transition-normal), visibility var(--transition-normal);
+    z-index: 201;
 }
 
-.redteam-head {
+.scenario-modal.active {
+    opacity: 1;
+    visibility: visible;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.scenario-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    flex-shrink: 0;
+}
+
+.scenario-heading { flex: 1 1 auto; min-width: 0; }
+
+.scenario-heading h2 {
     display: flex;
     align-items: center;
-    gap: 7px;
-    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
 }
 
-.redteam-icon { font-size: 14px; }
+.scenario-heading h2 svg { color: var(--text-secondary); }
 
-.redteam-label {
-    font-weight: 600;
+.scenario-sub {
+    margin-top: 4px;
     font-size: 13px;
+    color: var(--text-secondary);
+    max-width: 720px;
+}
+
+.scenario-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.scenario-btn {
+    height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.scenario-btn:hover { background: var(--surface-2); color: var(--text-primary); }
+
+.scenario-btn.primary {
+    background: var(--accent-primary);
+    border-color: transparent;
+    color: var(--accent-contrast);
+    font-weight: 600;
+}
+
+.scenario-btn.primary:hover { background: var(--accent-hover); }
+
+.scenario-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.scenario-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 12px 24px;
+    flex-shrink: 0;
+}
+
+.scenario-filters {
+    display: inline-flex;
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--border-medium);
+    border-radius: 10px;
+    background: var(--bg-secondary);
+}
+
+.scenario-filter {
+    height: 30px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.scenario-filter:hover { color: var(--text-primary); }
+
+.scenario-filter[aria-pressed="true"] {
+    background: var(--surface-3);
     color: var(--text-primary);
 }
 
-.redteam-expect {
+.scenario-summary {
     margin-left: auto;
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
     font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-muted);
-    background: transparent;
-    padding: 0;
-}
-
-.redteam-prompt {
-    margin: 8px 0;
-    padding: 8px 10px;
-    max-height: 110px;
-    overflow: auto;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
+    font-size: 12px;
     color: var(--text-secondary);
 }
 
-.redteam-actions {
-    display: flex;
+.scenario-tally {
+    display: inline-flex;
+    align-items: center;
     gap: 6px;
-    justify-content: flex-end;
+}
+
+.scenario-tally.pass .pipe-dot { background: var(--success); }
+.scenario-tally.missed .pipe-dot { background: var(--danger); }
+.scenario-tally.error .pipe-dot,
+.scenario-tally.skipped .pipe-dot { background: var(--warning); }
+.scenario-tally.notrun .pipe-dot { background: var(--border-medium); }
+
+.scenario-grid {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    align-content: start;
+    padding: 4px 24px 24px;
+}
+
+.scenario-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--border-medium);
+    border-radius: var(--radius-lg);
+    background: var(--surface-1);
+    min-width: 0;
+}
+
+.scenario-card.state-pass { border-left-color: var(--success); }
+.scenario-card.state-missed { border-left-color: var(--danger); border-color: var(--danger-border); border-left-color: var(--danger); }
+.scenario-card.state-error,
+.scenario-card.state-skipped { border-left-color: var(--warning); }
+.scenario-card.state-running { border-left-color: var(--accent-primary); }
+
+.scenario-card-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.scenario-stage {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+}
+
+.scenario-badge {
+    margin-left: auto;
+    padding: 2px 9px;
+    border: 1px solid var(--border-medium);
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.scenario-card.state-pass .scenario-badge { background: var(--success-bg); border-color: transparent; color: var(--success); }
+.scenario-card.state-missed .scenario-badge { background: var(--danger-bg); border-color: transparent; color: var(--danger-text); }
+.scenario-card.state-error .scenario-badge,
+.scenario-card.state-skipped .scenario-badge { background: var(--warning-bg); border-color: transparent; color: var(--warning); }
+.scenario-card.state-running .scenario-badge { background: var(--accent-bg); border-color: transparent; color: var(--accent-primary); }
+
+.scenario-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.35;
+}
+
+.scenario-prompt {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.scenario-expect {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.scenario-note {
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+
+.scenario-card.state-missed .scenario-note { border-color: var(--danger-border); }
+
+.scenario-card-foot {
+    margin-top: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 4px;
+}
+
+.scenario-meta {
+    margin-right: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.scenario-card-foot .msg-action-btn { height: 30px; }
+.scenario-card-foot .msg-action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 1000px) {
+    .scenario-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 680px) {
+    .scenario-grid { grid-template-columns: 1fr; }
+    .scenario-header { flex-direction: column; }
+    .scenario-modal { width: 100vw; height: 100vh; border-radius: 0; }
 }
 
 /* ============================================================

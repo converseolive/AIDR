@@ -539,31 +539,43 @@
     </div>
 
     <!-- ============================================================
-         Red-Team Prompt Library (right drawer)
+         Scenarios: scripted attacks with expected outcomes, run and scored.
+         Keeps the redteam* ids so the open/close plumbing is unchanged.
          ============================================================ -->
-    <div class="drawer-overlay" id="redteamOverlay"></div>
-    <aside class="side-drawer" id="redteamPanel" role="dialog" aria-modal="false" aria-labelledby="redteamPanelTitle" aria-hidden="true">
-        <div class="drawer-header">
-            <h2 id="redteamPanelTitle">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <circle cx="12" cy="12" r="4"></circle>
-                </svg>
-                Red-Team Library
-            </h2>
-            <button class="settings-close" id="redteamClose" aria-label="Close red-team prompt library">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-            </button>
+    <div class="modal-overlay" id="redteamOverlay"></div>
+    <div class="scenario-modal" id="redteamPanel" role="dialog" aria-modal="true" aria-labelledby="redteamPanelTitle" aria-hidden="true">
+        <div class="scenario-header">
+            <div class="scenario-heading">
+                <h2 id="redteamPanelTitle">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <circle cx="12" cy="12" r="4"></circle>
+                    </svg>
+                    Scenarios
+                </h2>
+                <p class="scenario-sub">Each card is a scripted attack with the outcome Guardian is expected to produce. Run one, or the whole set, and the result is scored against the expectation. Runs land in a "Scenario runs" chat; results reset when the page reloads.</p>
+            </div>
+            <div class="scenario-actions">
+                <button type="button" class="scenario-btn" id="scenarioResetBtn">Reset results</button>
+                <button type="button" class="scenario-btn primary" id="scenarioRunAllBtn">Run all</button>
+                <button class="settings-close" id="redteamClose" aria-label="Close scenarios">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
         </div>
-        <p class="drawer-note">
-            Synthetic prompts for exercising each AIDR detector family. Click to load
-            into the composer, or <strong>Send</strong> to fire it immediately.
-        </p>
-        <div class="drawer-body" id="redteamList"></div>
-    </aside>
+        <div class="scenario-toolbar">
+            <div class="scenario-filters" id="scenarioFilters" role="group" aria-label="Filter by stage">
+                <button type="button" class="scenario-filter" data-stage="all" aria-pressed="true">All</button>
+                <button type="button" class="scenario-filter" data-stage="input" aria-pressed="false">Input</button>
+                <button type="button" class="scenario-filter" data-stage="tools" aria-pressed="false">Tools</button>
+            </div>
+            <div class="scenario-summary" id="scenarioSummary"></div>
+        </div>
+        <div class="scenario-grid" id="redteamList"></div>
+    </div>
 
     <!-- ============================================================
          A/B Compare (AIDR on vs off)

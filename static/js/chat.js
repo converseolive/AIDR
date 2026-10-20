@@ -93,6 +93,12 @@ const guardianLive = document.getElementById('guardianLive');
 const guardianLiveText = document.getElementById('guardianLiveText');
 const guardianDetectors = document.getElementById('guardianDetectors');
 
+// Scenario runner controls
+const scenarioRunAllBtn = document.getElementById('scenarioRunAllBtn');
+const scenarioResetBtn = document.getElementById('scenarioResetBtn');
+const scenarioFilters = document.getElementById('scenarioFilters');
+const scenarioSummary = document.getElementById('scenarioSummary');
+
 // Header overflow menu and model chip
 const headerMenuBtn = document.getElementById('headerMenuBtn');
 const headerMenu = document.getElementById('headerMenu');
@@ -444,10 +450,23 @@ function setupEventListeners() {
         }
     });
 
-    // Red-team library
+    // Scenarios (the red-team library, run and scored)
     if (redteamBtn) redteamBtn.addEventListener('click', () => toggleDrawer('redteam'));
     if (redteamClose) redteamClose.addEventListener('click', () => closeDrawer('redteam'));
     if (redteamOverlay) redteamOverlay.addEventListener('click', () => closeDrawer('redteam'));
+    if (scenarioRunAllBtn) scenarioRunAllBtn.addEventListener('click', runAllScenarios);
+    if (scenarioResetBtn) scenarioResetBtn.addEventListener('click', resetScenarioResults);
+    if (scenarioFilters) {
+        scenarioFilters.addEventListener('click', (e) => {
+            const btn = e.target.closest('.scenario-filter');
+            if (!btn) return;
+            scenarioFilter = btn.dataset.stage || 'all';
+            scenarioFilters.querySelectorAll('.scenario-filter').forEach(b => {
+                b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
+            });
+            renderRedteam(currentScenarios);
+        });
+    }
 
     // A/B compare
     if (compareBtn) compareBtn.addEventListener('click', runCompare);
@@ -977,7 +996,13 @@ function sendMessage(overrideText) {
     const message = typeof overrideText === 'string'
         ? overrideText.trim()
         : chatInput.value.trim();
-    if ((!message && !selectedFile) || isWaiting) return;
+    if ((!message && !selectedFile) || isWaiting) return Promise.resolve(null);
+
+    // Callers that need the outcome (the scenario runner) await this; the
+    // normal UI path ignores it.
+    let resolveSend = () => {};
+    const done = new Promise(resolve => { resolveSend = resolve; });
+    let result = null;
 
     lastUserMessage = message;
 
@@ -1055,7 +1080,8 @@ function sendMessage(overrideText) {
         if (xhr.status >= 200 && xhr.status < 300) {
             try {
                 const data = JSON.parse(xhr.responseText);
-                
+                result = data;
+
                 // Update active chat ID if server created one
                 if (data.chat_id && !activeChatId) {
                     activeChatId = data.chat_id;
@@ -1098,6 +1124,7 @@ function sendMessage(overrideText) {
         } else {
             try {
                 const data = JSON.parse(xhr.responseText);
+                result = data;
                 if (data.needs_setup) {
                     appendError(data.error);
                     setTimeout(openSettings, 800);
@@ -1108,12 +1135,14 @@ function sendMessage(overrideText) {
                 appendError('Error ' + xhr.status + ': Failed to process response.');
             }
         }
+        resolveSend(result);
     };
 
     xhr.onerror = () => {
         hideTyping();
         appendError('Network error. Please check the server is running.');
         console.error('Chat error: Network request failed');
+        resolveSend(null);
         
         isWaiting = false;
         sendBtn.disabled = (!chatInput.value.trim() && !selectedFile);
@@ -1134,6 +1163,7 @@ function sendMessage(overrideText) {
         formData.append('file', fileDataToSend);
     }
     xhr.send(formData);
+    return done;
 }
 
 // ============================================================
@@ -2872,56 +2902,237 @@ async function loadRedteam() {
     }
 }
 
+// ============================================================
+// Scenario runner
+//
+// Every library prompt carries an expectation ("tool_input ·
+// confidential_and_pii_entity", or just a detector name). Running a
+// scenario sends the prompt through the normal chat path into a dedicated
+// "Scenario runs" chat, then scores the guard events against that
+// expectation. Results live in memory only: every launch starts clean.
+// ============================================================
+let currentScenarios = [];
+let scenarioResults = {};
+let scenarioFilter = 'all';
+let scenarioChatId = null;
+let scenarioRunning = false;
+
+const SCENARIO_LABELS = {
+    pass: 'As expected',
+    missed: 'Missed',
+    error: 'Guard error',
+    skipped: 'Skipped',
+    running: 'Running…',
+};
+
+function scenarioId(p) {
+    return `${p.category || ''}::${p.label || ''}`;
+}
+
+/** "tool_input · x" -> {phase: "tool_input", detector: "x"}; "x" -> {phase: null, detector: "x"}. */
+function parseExpect(expect) {
+    const parts = String(expect || '').split('·').map(s => s.trim()).filter(Boolean);
+    if (parts.length >= 2) return { phase: parts[0], detector: parts[parts.length - 1] };
+    return { phase: null, detector: parts[0] || '' };
+}
+
+function scenarioStage(p) {
+    const { phase } = parseExpect(p.expect);
+    if (phase && phase.startsWith('tool')) return 'tools';
+    if (phase === 'output') return 'output';
+    return 'input';
+}
+
+function evaluateScenario(p, data) {
+    if (!data) return { result: 'error', note: 'No response from the server.' };
+    if (data.error) return { result: 'error', note: data.error };
+    const { phase, detector } = parseExpect(p.expect);
+    const events = Array.isArray(data.aidr_events) ? data.aidr_events : [];
+    if (!detector) {
+        return { result: 'pass', note: 'No expectation declared; ran without error.' };
+    }
+    const hit = events.find(e =>
+        (!phase || e.phase === phase) && firedDetectors(e).some(d => d.name === detector)
+    );
+    if (hit) {
+        const outcome = hit.status === 'blocked' ? 'blocked' : hit.transformed ? 'redacted' : 'flagged';
+        return {
+            result: 'pass',
+            note: `${detector} fired at ${hit.phase}: ${outcome}.`,
+            latency: hit.latency_ms,
+        };
+    }
+    if (events.some(e => e.status === 'aidr_error')) {
+        const err = events.find(e => e.status === 'aidr_error');
+        return { result: 'error', note: err.error || 'The guard could not be reached.' };
+    }
+    const seen = events.filter(e => !phase || e.phase === phase);
+    const firedNames = [...new Set(seen.flatMap(e => firedDetectors(e).map(d => d.name)))];
+    const where = phase ? `at ${phase}` : 'on this turn';
+    let note = seen.length
+        ? `Expected ${detector} ${where}. `
+        : `No ${phase || 'guard'} event was recorded. `;
+    if (seen.length) {
+        note += firedNames.length ? `Fired instead: ${firedNames.join(', ')}.` : 'Nothing fired.';
+    }
+    if (phase && phase.startsWith('tool') && !seen.length) {
+        note += ' Check that Tools is on and the provider is Anthropic.';
+    }
+    return { result: 'missed', note };
+}
+
+async function ensureScenarioChat() {
+    if (scenarioChatId && chats.some(c => c.id === scenarioChatId)) {
+        if (activeChatId !== scenarioChatId) await switchChat(scenarioChatId);
+        return;
+    }
+    const resp = await fetch('/api/chats', { method: 'POST' });
+    const data = await resp.json();
+    scenarioChatId = data.id;
+    try {
+        await fetch(`/api/chats/${scenarioChatId}/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: 'Scenario runs' }),
+        });
+    } catch (e) { /* the default title is fine */ }
+    await loadChatList();
+    await switchChat(scenarioChatId);
+}
+
+function scenarioPreconditions(p) {
+    if (!isAidrEnabled) return 'Turn AIDR on first: a scenario is only meaningful with the guard running.';
+    if (p.needs_tools && (!isToolsEnabled || currentProvider() !== 'anthropic')) {
+        return 'This scenario needs Tools on and the Anthropic provider.';
+    }
+    return null;
+}
+
+async function runScenario(p) {
+    if (scenarioRunning || isWaiting) return;
+    const id = scenarioId(p);
+    const blocker = scenarioPreconditions(p);
+    if (blocker) {
+        scenarioResults[id] = { result: 'skipped', note: blocker, at: Date.now() };
+        renderRedteam(currentScenarios);
+        if (!isAidrEnabled) showAidrError(blocker);
+        return;
+    }
+    scenarioRunning = true;
+    scenarioResults[id] = { result: 'running', at: Date.now() };
+    renderRedteam(currentScenarios);
+    try {
+        await ensureScenarioChat();
+        const data = await sendMessage(p.prompt);
+        scenarioResults[id] = { ...evaluateScenario(p, data), at: Date.now() };
+    } catch (e) {
+        scenarioResults[id] = { result: 'error', note: String(e), at: Date.now() };
+    } finally {
+        scenarioRunning = false;
+        renderRedteam(currentScenarios);
+    }
+}
+
+async function runAllScenarios() {
+    if (scenarioRunning) return;
+    if (!isAidrEnabled) {
+        showAidrError('Turn AIDR on first: scenarios are only meaningful with the guard running.');
+        return;
+    }
+    const queue = visibleScenarios();
+    for (const p of queue) {
+        // Skipped ones record their reason without a round trip.
+        await runScenario(p);
+    }
+}
+
+function resetScenarioResults() {
+    scenarioResults = {};
+    renderRedteam(currentScenarios);
+}
+
+function visibleScenarios() {
+    return currentScenarios.filter(p => scenarioFilter === 'all' || scenarioStage(p) === scenarioFilter);
+}
+
+function renderScenarioSummary() {
+    if (!scenarioSummary) return;
+    const tally = { pass: 0, missed: 0, error: 0, skipped: 0, notrun: 0 };
+    currentScenarios.forEach(p => {
+        const r = scenarioResults[scenarioId(p)];
+        if (!r || r.result === 'running') tally.notrun += 1;
+        else if (tally[r.result] !== undefined) tally[r.result] += 1;
+    });
+    const bit = (cls, n, label) => `<span class="scenario-tally ${cls}"><span class="pipe-dot"></span>${n} ${label}</span>`;
+    scenarioSummary.innerHTML = [
+        bit('pass', tally.pass, 'as expected'),
+        bit('missed', tally.missed, 'missed'),
+        tally.error ? bit('error', tally.error, 'errors') : '',
+        tally.skipped ? bit('skipped', tally.skipped, 'skipped') : '',
+        bit('notrun', tally.notrun, 'not run'),
+    ].join('');
+    if (scenarioRunAllBtn) {
+        const n = visibleScenarios().length;
+        scenarioRunAllBtn.disabled = scenarioRunning || !n;
+        scenarioRunAllBtn.textContent = scenarioRunning ? 'Running…' : `Run ${scenarioFilter === 'all' ? 'all' : ''} ${n}`.replace(/\s+/g, ' ').trim();
+    }
+}
+
 function renderRedteam(prompts) {
+    currentScenarios = Array.isArray(prompts) ? prompts : [];
     redteamList.innerHTML = '';
-    if (!prompts.length) {
-        redteamList.innerHTML = '<div class="drawer-empty">No prompts available.</div>';
+    renderScenarioSummary();
+
+    const visible = visibleScenarios();
+    if (!visible.length) {
+        redteamList.innerHTML = '<div class="drawer-empty">No scenarios for this filter.</div>';
         return;
     }
 
-    // Group by detector category
-    const groups = new Map();
-    prompts.forEach(p => {
-        if (!groups.has(p.category)) groups.set(p.category, []);
-        groups.get(p.category).push(p);
-    });
+    visible.forEach(p => {
+        const id = scenarioId(p);
+        const r = scenarioResults[id] || null;
+        const state = r ? r.result : 'notrun';
+        const stage = scenarioStage(p);
+        const { phase, detector } = parseExpect(p.expect);
 
-    groups.forEach((items, category) => {
-        const label = document.createElement('div');
-        label.className = 'drawer-group-label';
-        label.textContent = category;
-        redteamList.appendChild(label);
+        const card = document.createElement('article');
+        card.className = `scenario-card state-${state}`;
+        card.innerHTML = `
+            <div class="scenario-card-head">
+                <span class="scenario-stage">${escapeHtml(stage)}</span>
+                ${p.needs_tools ? '<span class="verdict-chip tool-chip" title="Needs the Tools toggle on and the Anthropic provider">🔧 tools</span>' : ''}
+                <span class="scenario-badge">${escapeHtml(SCENARIO_LABELS[state] || 'Not run')}</span>
+            </div>
+            <h3 class="scenario-title">${escapeHtml(p.icon ? p.icon + ' ' : '')}${escapeHtml(p.label)}</h3>
+            <p class="scenario-prompt" title="${escapeHtml(p.prompt)}">${escapeHtml(p.prompt)}</p>
+            <div class="scenario-expect">
+                ${phase ? `<span class="verdict-chip">${escapeHtml(phase)}</span>` : ''}
+                ${detector ? `<span class="verdict-chip">${escapeHtml(detector)}</span>` : ''}
+            </div>
+            ${r && r.note && state !== 'running' ? `<div class="scenario-note">${escapeHtml(r.note)}</div>` : ''}
+            <div class="scenario-card-foot">
+                <span class="scenario-meta">${r && typeof r.latency === 'number' ? `${r.latency} ms` : state === 'notrun' ? 'expects ' + escapeHtml(detector || 'a clean run') : ''}</span>
+                <button type="button" class="msg-action-btn" data-act="load" title="Load into the composer">Load</button>
+                ${r && state !== 'running' && scenarioChatId ? '<button type="button" class="msg-action-btn" data-act="open" title="Open the Scenario runs chat">Open</button>' : ''}
+                <button type="button" class="msg-action-btn primary" data-act="run" ${state === 'running' || scenarioRunning ? 'disabled' : ''}>${r && state !== 'running' ? 'Run again' : state === 'running' ? 'Running…' : 'Run'}</button>
+            </div>`;
 
-        items.forEach(p => {
-            const card = document.createElement('div');
-            card.className = 'redteam-card';
-            card.innerHTML = `
-                <div class="redteam-head">
-                    <span class="redteam-icon">${escapeHtml(p.icon || '⚠️')}</span>
-                    <span class="redteam-label">${escapeHtml(p.label)}</span>
-                    ${p.expect ? `<code class="redteam-expect">${escapeHtml(p.expect)}</code>` : ''}
-                    ${p.needs_tools ? '<span class="verdict-chip tool-chip" title="Needs the Tools toggle on and the Anthropic provider">🔧 needs tools</span>' : ''}
-                </div>
-                <pre class="redteam-prompt">${escapeHtml(p.prompt)}</pre>
-                <div class="redteam-actions">
-                    <button type="button" class="msg-action-btn" data-act="load">Load</button>
-                    <button type="button" class="msg-action-btn primary" data-act="send">Send</button>
-                </div>`;
-
-            card.querySelector('[data-act="load"]').addEventListener('click', () => {
-                chatInput.value = p.prompt;
-                sendBtn.disabled = false;
-                autoResizeTextarea();
-                closeDrawer('redteam');
-                chatInput.focus();
-            });
-            card.querySelector('[data-act="send"]').addEventListener('click', () => {
-                closeDrawer('redteam');
-                sendMessage(p.prompt);
-            });
-
-            redteamList.appendChild(card);
+        card.querySelector('[data-act="load"]').addEventListener('click', () => {
+            chatInput.value = p.prompt;
+            sendBtn.disabled = false;
+            autoResizeTextarea();
+            closeDrawer('redteam');
+            chatInput.focus();
         });
+        const openBtn = card.querySelector('[data-act="open"]');
+        if (openBtn) openBtn.addEventListener('click', async () => {
+            closeDrawer('redteam');
+            if (scenarioChatId) await switchChat(scenarioChatId);
+        });
+        card.querySelector('[data-act="run"]').addEventListener('click', () => runScenario(p));
+
+        redteamList.appendChild(card);
     });
 }
 
