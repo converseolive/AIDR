@@ -1071,7 +1071,10 @@ function sendMessage(overrideText) {
                 addUsage(data.usage);
 
                 if (data.blocked) {
-                    appendBlockedMessage(data.message, data.block_type, data.aidr, data.tool_calls);
+                    appendBlockedMessage(data.message, data.block_type, data.aidr, data.tool_calls, {
+                        aidr_input: data.block_type === 'output' ? data.aidr_input : null,
+                        aidr_listing: data.aidr_listing,
+                    });
                 } else {
                     // Redaction happens on the request side, so surface the
                     // input verdict as its own notice above the reply.
@@ -1079,6 +1082,8 @@ function sendMessage(overrideText) {
                     if (inputNotice) chatMessages.appendChild(inputNotice);
                     appendMessage('assistant', data.response, null, {
                         aidr: data.aidr_output,
+                        aidr_input: data.aidr_input,
+                        aidr_listing: data.aidr_listing,
                         usage: data.usage,
                         tool_calls: data.tool_calls,
                     });
@@ -1218,6 +1223,12 @@ function appendMessage(role, content, attachment = null, meta = {}) {
         contentEl.innerHTML += attachHtml;
     }
 
+    // The guard pipeline for this turn, only when something fired.
+    if (role === 'assistant') {
+        const strip = buildPipelineStrip(meta);
+        if (strip) contentEl.appendChild(strip);
+    }
+
     // Tool calls the model made on this turn, each with its AIDR verdicts.
     // They come before the text because that's the order they happened in.
     if (Array.isArray(meta.tool_calls) && meta.tool_calls.length) {
@@ -1324,7 +1335,7 @@ function findPreviousUserMessage(el) {
     return '';
 }
 
-function appendBlockedMessage(message, blockType, aidr = null, toolCalls = null) {
+function appendBlockedMessage(message, blockType, aidr = null, toolCalls = null, meta = {}) {
     const messageEl = document.createElement('div');
     messageEl.className = 'message assistant blocked';
 
@@ -1343,6 +1354,17 @@ function appendBlockedMessage(message, blockType, aidr = null, toolCalls = null)
             AIDR Security — ${blockType === 'input' ? 'Input Blocked' : 'Output Blocked'}
         </div>
     `;
+
+    // An output block is the end of a pipeline: show the whole run above it.
+    if (blockType === 'output') {
+        const strip = buildPipelineStrip({
+            aidr_input: meta.aidr_input,
+            aidr_listing: meta.aidr_listing,
+            tool_calls: toolCalls,
+            aidr: aidr,
+        });
+        if (strip) contentEl.appendChild(strip);
+    }
 
     // Tool calls ran before the output was judged, so they sit above the block.
     if (Array.isArray(toolCalls) && toolCalls.length) {
@@ -1946,6 +1968,9 @@ async function switchChat(id) {
         renderActivity();
 
         if (data.messages && data.messages.length > 0) {
+            // The input verdict lives on the user turn; carry it to the reply
+            // so the pipeline strip can show the whole run.
+            let lastUserAidr = null;
             data.messages.forEach(msg => {
                 if (msg.role === 'system') return;
                 if (msg.blocked === 'input') {
@@ -1957,6 +1982,7 @@ async function switchChat(id) {
                         'input',
                         msg.aidr
                     );
+                    lastUserAidr = null;
                     return;
                 }
                 if (msg.blocked === 'output') {
@@ -1964,15 +1990,20 @@ async function switchChat(id) {
                         '⚠️ The AI response was blocked by CrowdStrike AIDR security.',
                         'output',
                         msg.aidr,
-                        msg.tool_calls
+                        msg.tool_calls,
+                        { aidr_input: lastUserAidr, aidr_listing: msg.aidr_listing }
                     );
+                    lastUserAidr = null;
                     return;
                 }
                 appendMessage(msg.role, msg.content, null, {
                     aidr: msg.aidr,
+                    aidr_input: msg.role === 'assistant' ? lastUserAidr : null,
+                    aidr_listing: msg.aidr_listing,
                     usage: msg.usage,
                     tool_calls: msg.tool_calls,
                 });
+                lastUserAidr = msg.role === 'user' ? (msg.aidr || null) : null;
                 addUsage(msg.usage);
             });
             // Remember the last prompt so Regenerate works after a reload
@@ -2110,6 +2141,77 @@ function firedDetectors(aidr) {
  * nothing worth showing (guard disabled, or a clean pass with no detail).
  */
 // ============================================================
+// Pipeline strip: the guard run for one assistant turn
+// ============================================================
+const PIPE_LABELS = {
+    clean: 'Allowed',
+    fired: 'Detector fired',
+    redacted: 'Redacted',
+    blocked: 'Blocked',
+    error: 'Guard unavailable',
+    unknown: 'Verdict unread',
+};
+
+function pipelineState(v) {
+    if (!v || !v.status || v.status === 'aidr_unavailable') return null;
+    if (v.status === 'blocked') return 'blocked';
+    if (v.status === 'aidr_error') return 'error';
+    if (v.transformed) return 'redacted';
+    if (firedDetectors(v).length) return 'fired';
+    if (v.detectors_unknown) return 'unknown';
+    return 'clean';
+}
+
+/**
+ * Input, tool listing, tools, output as one row of steps. Rendered only when
+ * something happened on the turn (a block, a redaction, a guard error, a
+ * fired detector, or a tool call); clean turns stay plain.
+ */
+function buildPipelineStrip(meta) {
+    const input = meta.aidr_input || null;
+    const listing = meta.aidr_listing || null;
+    const output = meta.aidr || null;
+    const tools = Array.isArray(meta.tool_calls) ? meta.tool_calls : [];
+
+    const steps = [];
+    const si = pipelineState(input);
+    if (si) steps.push({ label: 'Input', state: si, ms: input.latency_ms });
+    const sl = pipelineState(listing);
+    if (sl) steps.push({ label: 'Tool listing', state: sl, ms: listing.latency_ms });
+    if (tools.length) {
+        const blocked = tools.filter(t => t.status === 'blocked_input' || t.status === 'blocked_output').length;
+        const redacted = tools.filter(t => t.status === 'redacted').length;
+        const errors = tools.filter(t => t.status === 'error').length;
+        const state = blocked ? 'blocked' : redacted ? 'redacted' : errors ? 'error' : 'fired';
+        const bits = [`${tools.length} call${tools.length === 1 ? '' : 's'}`];
+        if (blocked) bits.push(`${blocked} blocked`);
+        if (redacted) bits.push(`${redacted} redacted`);
+        steps.push({ label: 'Tools', state, note: bits.join(' · ') });
+    }
+    const so = pipelineState(output);
+    if (so) steps.push({ label: 'Output', state: so, ms: output.latency_ms });
+
+    if (!steps.length || !steps.some(s => s.state !== 'clean')) return null;
+
+    const strip = document.createElement('div');
+    strip.className = 'pipeline-strip';
+    strip.setAttribute('aria-label', 'Guard pipeline for this turn');
+    strip.innerHTML = steps.map((s, i) => `
+        ${i ? '<span class="pipe-link"></span>' : ''}
+        <span class="pipe-step state-${s.state}${s.state !== 'clean' ? ' is-hot' : ''}" title="${escapeHtml(PIPE_LABELS[s.state] || s.state)}">
+            <span class="pipe-dot"></span>
+            <span class="pipe-label">${escapeHtml(s.label)}</span>
+            ${s.note ? `<span class="pipe-note">${escapeHtml(s.note)}</span>` : ''}
+            ${typeof s.ms === 'number' ? `<span class="pipe-ms">${s.ms} ms</span>` : ''}
+        </span>`).join('');
+    const policy = (output && output.policy) || (input && input.policy);
+    if (policy) {
+        strip.insertAdjacentHTML('beforeend', `<span class="pipe-policy">${escapeHtml(policy)}</span>`);
+    }
+    return strip;
+}
+
+// ============================================================
 // Tool calls (Anthropic tool use, guarded by AIDR tool events)
 // ============================================================
 const TOOL_STATUS_LABELS = {
@@ -2139,12 +2241,24 @@ function buildToolCallCard(tc) {
     // Anything other than a clean run is the point of the demo, so open it.
     details.open = status !== 'executed';
 
+    // One-line summary: name, the arguments the model chose, and the outcome.
+    let argsPreview = '';
+    try {
+        const s = JSON.stringify(tc.input || {});
+        argsPreview = s.length > 72 ? s.slice(0, 72) + '…' : s;
+    } catch (e) { /* leave empty */ }
+    let statusLabel = TOOL_STATUS_LABELS[status] || status;
+    if (status === 'redacted') {
+        const n = firedDetectors(tc.aidr_output || {}).length;
+        if (n) statusLabel += ` · ${n} detector${n === 1 ? '' : 's'}`;
+    }
+
     const summary = document.createElement('summary');
     summary.innerHTML = `
-        <span class="tool-call-icon">🔧</span>
-        <span class="verdict-label">Tool call</span>
+        <span class="tool-call-icon" aria-hidden="true">🔧</span>
         <code class="tool-call-name">${escapeHtml(tc.name || 'tool')}</code>
-        <span class="tool-call-status">${escapeHtml(TOOL_STATUS_LABELS[status] || status)}</span>`;
+        ${argsPreview ? `<span class="tool-call-args" title="${escapeHtml(argsPreview)}">${escapeHtml(argsPreview)}</span>` : ''}
+        <span class="tool-call-status">${escapeHtml(statusLabel)}</span>`;
     details.appendChild(summary);
 
     const body = document.createElement('div');
@@ -2171,7 +2285,7 @@ function buildToolCallCard(tc) {
 
     body.appendChild(section('Arguments', pretty(tc.input)));
 
-    const inVerdict = buildVerdictPanel(tc.aidr_input, { open: status === 'blocked_input' });
+    const inVerdict = buildVerdictPanel(tc.aidr_input, { open: status === 'blocked_input', always: true });
     if (inVerdict) body.appendChild(inVerdict);
 
     if (status === 'blocked_input') {
@@ -2185,6 +2299,7 @@ function buildToolCallCard(tc) {
 
     const outVerdict = buildVerdictPanel(tc.aidr_output, {
         open: status === 'blocked_output' || status === 'redacted',
+        always: true,
     });
     if (outVerdict) body.appendChild(outVerdict);
 
@@ -2254,12 +2369,12 @@ function buildVerdictPanel(aidr, opts = {}) {
     const isBlocked = aidr.status === 'blocked';
     const isError = aidr.status === 'aidr_error';
 
-    // A clean pass with no detectors, no redaction and no timing has nothing
-    // to disclose — don't clutter every message with an empty panel.
-    if (!isBlocked && !isError && !detectors.length && !aidr.transformed
-        && aidr.latency_ms === undefined) {
-        return null;
-    }
+    // A clean pass stays quiet on the message itself: the Guardian panel keeps
+    // the full record. Tool cards pass `always` because there the verdict is
+    // part of the story even when it's clean.
+    const quiet = !isBlocked && !isError && !aidr.transformed
+        && !fired.length && !aidr.detectors_unknown;
+    if (quiet && !opts.always) return null;
 
     const details = document.createElement('details');
     details.className = 'aidr-verdict ' + (

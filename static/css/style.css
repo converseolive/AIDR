@@ -2623,6 +2623,89 @@ mark.diff-added {
 }
 
 /* ============================================================
+   Pipeline strip: the guard run for one assistant turn
+   ============================================================ */
+.pipeline-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-1);
+    font-size: 12px;
+}
+
+.pipe-step {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 9px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.pipe-step.is-hot {
+    background: var(--surface-3);
+    border-color: var(--border-medium);
+    color: var(--text-primary);
+}
+
+.pipe-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--success);
+    flex-shrink: 0;
+}
+
+.pipe-step.state-fired .pipe-dot,
+.pipe-step.state-redacted .pipe-dot,
+.pipe-step.state-error .pipe-dot,
+.pipe-step.state-unknown .pipe-dot { background: var(--warning); }
+.pipe-step.state-blocked .pipe-dot { background: var(--danger); }
+.pipe-step.state-blocked .pipe-label { color: var(--danger-text); }
+
+.pipe-label { font-weight: 500; }
+.pipe-note { color: var(--text-secondary); }
+
+.pipe-ms {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.pipe-link {
+    width: 22px;
+    height: 1px;
+    background: var(--border-medium);
+    flex-shrink: 0;
+}
+
+.pipe-policy {
+    margin-left: auto;
+    padding-left: 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.tool-call-args {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 320px;
+    min-width: 0;
+}
+
+/* ============================================================
    Tool calls (Anthropic tool use, guarded by AIDR tool events)
    ============================================================ */
 .tool-calls {

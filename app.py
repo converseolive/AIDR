@@ -2108,6 +2108,7 @@ def chat():
     # --- AIDR Tool Listing Guard ---
     # Once per turn, the tool surface itself is submitted for inspection. If
     # the policy objects to the tools on offer, this turn runs without them.
+    listing_details = None
     if use_tools and aidr_enabled:
         listing_blocked, listing_details = aidr_guard(
             [{"role": "user", "content": user_message}],
@@ -2149,6 +2150,7 @@ def chat():
         return jsonify({
             "error": f"LLM error: {str(e)}",
             "tool_calls": tool_trace or None,
+                "aidr_listing": listing_details,
             "aidr_events": [e for e in (input_event, *turn_events) if e],
         }), 500
 
@@ -2181,6 +2183,7 @@ def chat():
                 "aidr": output_details,
                 "blocked": "output",
                 "tool_calls": tool_trace or None,
+                "aidr_listing": listing_details,
             })
             chat_session["messages"] = _trim_history(history)
             _save_chat_sessions()
@@ -2191,6 +2194,7 @@ def chat():
                 "aidr": output_details,
                 "aidr_events": [e for e in (input_event, *turn_events, output_event) if e],
                 "tool_calls": tool_trace or None,
+                "aidr_listing": listing_details,
                 "tools_active": use_tools,
                 "chat_id": chat_id,
                 "chat_title": chat_session["title"],
@@ -2211,6 +2215,7 @@ def chat():
         "aidr": output_details,
         "usage": usage,
         "tool_calls": tool_trace or None,
+        "aidr_listing": listing_details,
     })
 
     # Auto-title from first user message
@@ -2234,6 +2239,7 @@ def chat():
         "aidr_output": output_details,
         "aidr_events": [e for e in (input_event, *turn_events, output_event) if e],
         "tool_calls": tool_trace or None,
+        "aidr_listing": listing_details,
         "tools_active": use_tools,
         "usage": usage,
         "model": model,
