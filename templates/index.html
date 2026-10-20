@@ -245,21 +245,25 @@
                 </div>
             </div>
             <div class="header-right">
-                <button class="aidr-badge aidr-disabled" id="aidrBadge" title="Toggle CrowdStrike AIDR Protection" aria-pressed="false">
-                    <div class="shield-icon">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                <!-- Protection: the two state toggles, grouped -->
+                <div class="protection-control" role="group" aria-label="Protection">
+                    <button class="aidr-badge aidr-disabled" id="aidrBadge" title="Toggle CrowdStrike AIDR protection" aria-pressed="false">
+                        <div class="shield-icon">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            </svg>
+                        </div>
+                        <span id="aidrText">AIDR Off</span>
+                    </button>
+                    <button class="aidr-badge tools-badge tools-off" id="toolsBadge" title="Toggle demo tools: lookup_customer and send_email (Anthropic only)" aria-pressed="false">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
                         </svg>
-                    </div>
-                    <span id="aidrText">AIDR Disabled</span>
-                </button>
-                <button class="aidr-badge tools-badge tools-off" id="toolsBadge" title="Toggle demo tools: lookup_customer and send_email (Anthropic only)" aria-pressed="false">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-                    </svg>
-                    <span id="toolsText">Tools Off</span>
-                </button>
-                <button class="header-btn demo-btn" id="redteamBtn" title="Red-team prompt library" aria-label="Open red-team prompt library" aria-expanded="false">
+                        <span id="toolsText">Tools Off</span>
+                    </button>
+                </div>
+                <span class="model-chip" id="headerModelChip" title="Active model">not set</span>
+                <button class="header-btn demo-btn" id="redteamBtn" title="Scenarios" aria-label="Open the scenario library" aria-expanded="false">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="10"></circle>
                         <circle cx="12" cy="12" r="4"></circle>
@@ -269,48 +273,65 @@
                         <line x1="18" y1="12" x2="22" y2="12"></line>
                     </svg>
                 </button>
-                <button class="header-btn demo-btn" id="activityBtn" title="AIDR activity timeline" aria-label="Open AIDR activity timeline" aria-expanded="false">
+                <button class="header-btn demo-btn" id="activityBtn" title="Guardian panel" aria-label="Toggle the Guardian panel" aria-expanded="true">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
                     </svg>
                     <span class="activity-count hidden" id="activityCount">0</span>
                 </button>
-                <button class="header-btn demo-btn" id="compareBtn" title="Compare with AIDR on vs off" aria-label="Compare the current prompt with AIDR on versus off">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="3" y="4" width="7" height="16" rx="1"></rect>
-                        <rect x="14" y="4" width="7" height="16" rx="1"></rect>
-                    </svg>
-                </button>
-                <button class="header-btn demo-btn" id="exportBtn" title="Export transcript as Markdown" aria-label="Export this chat as a Markdown transcript">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                </button>
-                <button class="header-btn" id="themeToggleBtn" title="Toggle Light/Dark Theme">
-                    <svg class="icon-moon hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-                    </svg>
-                    <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="5"></circle>
-                        <line x1="12" y1="1" x2="12" y2="3"></line>
-                        <line x1="12" y1="21" x2="12" y2="23"></line>
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-                        <line x1="1" y1="12" x2="3" y2="12"></line>
-                        <line x1="21" y1="12" x2="23" y2="12"></line>
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-                    </svg>
-                </button>
-                <button class="header-btn" id="clearChatBtn" title="Clear chat">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
-                <button class="header-btn" id="settingsBtn" title="Settings">
+                <!-- Overflow menu: the less frequent actions -->
+                <div class="header-menu-wrap">
+                    <button class="header-btn" id="headerMenuBtn" title="More" aria-label="More actions" aria-haspopup="true" aria-expanded="false">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <circle cx="5" cy="12" r="2"></circle>
+                            <circle cx="12" cy="12" r="2"></circle>
+                            <circle cx="19" cy="12" r="2"></circle>
+                        </svg>
+                    </button>
+                    <div class="header-menu hidden" id="headerMenu" role="menu" aria-label="More actions">
+                        <button class="header-menu-item" id="compareBtn" role="menuitem" title="Compare with AIDR on vs off">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <rect x="3" y="4" width="7" height="16" rx="1"></rect>
+                                <rect x="14" y="4" width="7" height="16" rx="1"></rect>
+                            </svg>
+                            <span>Compare AIDR on vs off</span>
+                        </button>
+                        <button class="header-menu-item" id="exportBtn" role="menuitem" title="Export transcript as Markdown">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            <span>Export transcript</span>
+                        </button>
+                        <button class="header-menu-item" id="themeToggleBtn" role="menuitem" title="Toggle light/dark theme">
+                            <svg class="icon-moon hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                            </svg>
+                            <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <circle cx="12" cy="12" r="5"></circle>
+                                <line x1="12" y1="1" x2="12" y2="3"></line>
+                                <line x1="12" y1="21" x2="12" y2="23"></line>
+                                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                                <line x1="1" y1="12" x2="3" y2="12"></line>
+                                <line x1="21" y1="12" x2="23" y2="12"></line>
+                                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                            </svg>
+                            <span>Toggle theme</span>
+                        </button>
+                        <div class="header-menu-divider" role="separator"></div>
+                        <button class="header-menu-item danger" id="clearChatBtn" role="menuitem" title="Clear chat">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                            <span>Clear chat</span>
+                        </button>
+                    </div>
+                </div>
+                <button class="header-btn" id="settingsBtn" title="Settings" aria-label="Settings">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"></circle>
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -446,32 +467,76 @@
             </div>
         </div>
     </div>
-    </div>
 
-    <!-- ============================================================
-         AIDR Activity Timeline (right drawer)
-         ============================================================ -->
-    <div class="drawer-overlay" id="activityOverlay"></div>
-    <aside class="side-drawer" id="activityPanel" role="dialog" aria-modal="false" aria-labelledby="activityPanelTitle" aria-hidden="true">
-        <div class="drawer-header">
-            <h2 id="activityPanelTitle">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                </svg>
-                AIDR Activity
-            </h2>
-            <button class="settings-close" id="activityClose" aria-label="Close AIDR activity panel">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
+        <!-- ============================================================
+             Guardian panel: the live guard timeline. Pinned, it sits in
+             the layout; unpinned, it collapses to the rail below and
+             slides over the chat on hover or click.
+             ============================================================ -->
+        <aside class="guardian-panel" id="activityPanel" aria-labelledby="activityPanelTitle">
+            <div class="guardian-header">
+                <span class="guardian-title" id="activityPanelTitle">Guardian</span>
+                <span class="guardian-live" id="guardianLive"><span class="aidr-dot"></span><span id="guardianLiveText">Live</span></span>
+                <div class="guardian-tools">
+                    <button class="guardian-icon-btn" id="guardianPinBtn" aria-label="Pin panel open" aria-pressed="true" title="Pinned: the panel stays open">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 17v5"></path>
+                            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path>
+                        </svg>
+                    </button>
+                    <button class="guardian-icon-btn" id="activityClose" aria-label="Collapse panel" title="Collapse to the rail">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M9 18l6-6-6-6"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="drawer-stats" id="activityStats"></div>
+            <div class="guardian-section-title">Timeline</div>
+            <div class="drawer-body guardian-body" id="activityList">
+                <div class="drawer-empty">No guarded turns yet. Send a message with AIDR enabled to populate the timeline.</div>
+            </div>
+            <div class="guardian-detectors hidden" id="guardianDetectors"></div>
+        </aside>
+
+        <!-- Collapsed rail: shown only when the panel is unpinned -->
+        <div class="guardian-rail" id="guardianRail" aria-label="Guardian, collapsed">
+            <button class="rail-btn" id="guardianRailExpandBtn" aria-label="Open Guardian panel" title="Open the panel">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M15 18l-6-6 6-6"></path>
                 </svg>
             </button>
+            <span class="rail-divider"></span>
+            <button class="rail-btn primary" id="guardianRailStatusBtn" aria-label="Guardian status" title="Guardian status">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                </svg>
+                <span class="rail-badge hidden" id="guardianRailBadge">0</span>
+            </button>
+            <button class="rail-btn" id="guardianRailTimelineBtn" aria-label="Timeline" title="Timeline">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+                <span class="rail-dot hidden" id="guardianRailDot"></span>
+            </button>
+            <button class="rail-btn" id="guardianRailScenariosBtn" aria-label="Scenarios" title="Scenarios">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <circle cx="12" cy="12" r="4"></circle>
+                </svg>
+            </button>
+            <div class="rail-foot">
+                <span class="rail-label" id="guardianRailLabel">off</span>
+                <span class="aidr-dot rail-live-dot" id="guardianRailLiveDot"></span>
+                <button class="rail-btn small" id="guardianRailPinBtn" aria-label="Pin panel open" aria-pressed="false" title="Pin: keep the panel open">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 17v5"></path>
+                        <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path>
+                    </svg>
+                </button>
+            </div>
         </div>
-        <div class="drawer-stats" id="activityStats"></div>
-        <div class="drawer-body" id="activityList">
-            <div class="drawer-empty">No guarded turns yet. Send a message with AIDR enabled to populate the timeline.</div>
-        </div>
-    </aside>
+    </div>
 
     <!-- ============================================================
          Red-Team Prompt Library (right drawer)

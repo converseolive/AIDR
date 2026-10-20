@@ -77,6 +77,27 @@ const activityList = document.getElementById('activityList');
 const activityStats = document.getElementById('activityStats');
 const activityCount = document.getElementById('activityCount');
 
+// Guardian panel (the timeline's home) and its collapsed rail
+const guardianRail = document.getElementById('guardianRail');
+const guardianPinBtn = document.getElementById('guardianPinBtn');
+const guardianRailPinBtn = document.getElementById('guardianRailPinBtn');
+const guardianRailExpandBtn = document.getElementById('guardianRailExpandBtn');
+const guardianRailStatusBtn = document.getElementById('guardianRailStatusBtn');
+const guardianRailTimelineBtn = document.getElementById('guardianRailTimelineBtn');
+const guardianRailScenariosBtn = document.getElementById('guardianRailScenariosBtn');
+const guardianRailBadge = document.getElementById('guardianRailBadge');
+const guardianRailDot = document.getElementById('guardianRailDot');
+const guardianRailLabel = document.getElementById('guardianRailLabel');
+const guardianRailLiveDot = document.getElementById('guardianRailLiveDot');
+const guardianLive = document.getElementById('guardianLive');
+const guardianLiveText = document.getElementById('guardianLiveText');
+const guardianDetectors = document.getElementById('guardianDetectors');
+
+// Header overflow menu and model chip
+const headerMenuBtn = document.getElementById('headerMenuBtn');
+const headerMenu = document.getElementById('headerMenu');
+const headerModelChip = document.getElementById('headerModelChip');
+
 // Red-Team Library
 const redteamBtn = document.getElementById('redteamBtn');
 const redteamPanel = document.getElementById('redteamPanel');
@@ -133,6 +154,7 @@ const LS_KEYS = {
     OLLAMA_URL: 'aidr_app_ollama_url',
     TOOLS: 'aidr_app_tools',
     POISON_URL: 'aidr_app_poison_url',
+    GUARDIAN_PINNED: 'aidr_app_guardian_pinned',
 };
 
 const PERSONA_HINTS = {
@@ -336,7 +358,7 @@ function setupEventListeners() {
                 isAidrEnabled = true;
                 aidrBadge.classList.remove('aidr-disabled');
                 aidrBadge.setAttribute('aria-pressed', 'true');
-                if (aidrText) aidrText.textContent = 'AIDR Protected';
+                if (aidrText) aidrText.textContent = 'AIDR On';
                 if (aidrIndicator) aidrIndicator.classList.remove('aidr-off');
                 if (aidrIndicatorText) aidrIndicatorText.textContent = 'AIDR Active';
             } else {
@@ -344,10 +366,11 @@ function setupEventListeners() {
                 isAidrEnabled = false;
                 aidrBadge.classList.add('aidr-disabled');
                 aidrBadge.setAttribute('aria-pressed', 'false');
-                if (aidrText) aidrText.textContent = 'AIDR Disabled';
+                if (aidrText) aidrText.textContent = 'AIDR Off';
                 if (aidrIndicator) aidrIndicator.classList.add('aidr-off');
                 if (aidrIndicatorText) aidrIndicatorText.textContent = 'AIDR Inactive';
             }
+            renderActivity(); // the Guardian panel's live label follows this toggle
         });
     }
 
@@ -393,10 +416,33 @@ function setupEventListeners() {
         themeToggleBtn.addEventListener('click', toggleTheme);
     }
 
-    // AIDR activity timeline
-    if (activityBtn) activityBtn.addEventListener('click', () => toggleDrawer('activity'));
-    if (activityClose) activityClose.addEventListener('click', () => closeDrawer('activity'));
-    if (activityOverlay) activityOverlay.addEventListener('click', () => closeDrawer('activity'));
+    // Guardian panel: pin keeps it in the layout, collapse folds it to the rail
+    if (activityBtn) activityBtn.addEventListener('click', toggleGuardian);
+    if (activityClose) activityClose.addEventListener('click', () => setGuardianPinned(false));
+    if (guardianPinBtn) guardianPinBtn.addEventListener('click', () => setGuardianPinned(!guardianPinned));
+    if (guardianRailPinBtn) guardianRailPinBtn.addEventListener('click', () => setGuardianPinned(true));
+    if (guardianRailExpandBtn) guardianRailExpandBtn.addEventListener('click', () => setGuardianPeek(!appWrapper.classList.contains('guardian-peek')));
+    if (guardianRailStatusBtn) guardianRailStatusBtn.addEventListener('click', () => setGuardianPeek(true));
+    if (guardianRailTimelineBtn) guardianRailTimelineBtn.addEventListener('click', () => setGuardianPeek(true));
+    if (guardianRailScenariosBtn) guardianRailScenariosBtn.addEventListener('click', () => toggleDrawer('redteam'));
+    initGuardian();
+
+    // Header overflow menu
+    if (headerMenuBtn) headerMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleHeaderMenu(); });
+    if (headerMenu) headerMenu.addEventListener('click', (e) => {
+        // Any item click closes the menu; the item's own handler still runs.
+        if (e.target.closest('.header-menu-item')) closeHeaderMenu();
+    });
+    document.addEventListener('click', (e) => {
+        if (headerMenu && !headerMenu.classList.contains('hidden') && !e.target.closest('.header-menu-wrap')) {
+            closeHeaderMenu();
+        }
+        // A peeked Guardian panel closes when you click back into the chat.
+        if (appWrapper.classList.contains('guardian-peek')
+            && !e.target.closest('#activityPanel, #guardianRail, #activityBtn')) {
+            setGuardianPeek(false);
+        }
+    });
 
     // Red-team library
     if (redteamBtn) redteamBtn.addEventListener('click', () => toggleDrawer('redteam'));
@@ -422,14 +468,15 @@ function setupEventListeners() {
     // Escape closes whatever is open, innermost first
     document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
+        if (headerMenu && !headerMenu.classList.contains('hidden')) return closeHeaderMenu();
         if (comparePanel && comparePanel.classList.contains('active')) return closeDrawer('compare');
         if (settingsPanel && settingsPanel.classList.contains('active')) return closeSettings();
         if (redteamPanel && redteamPanel.classList.contains('active')) return closeDrawer('redteam');
-        if (activityPanel && activityPanel.classList.contains('active')) return closeDrawer('activity');
+        if (appWrapper.classList.contains('guardian-peek')) return setGuardianPeek(false);
     });
 
     // Keep focus inside open dialogs (Tab / Shift+Tab)
-    [settingsPanel, activityPanel, redteamPanel, comparePanel].forEach(panel => {
+    [settingsPanel, redteamPanel, comparePanel].forEach(panel => {
         if (panel) panel.addEventListener('keydown', (e) => trapFocus(e, panel));
     });
 }
@@ -603,7 +650,7 @@ async function connectAidr() {
             // Update header badge
             aidrBadge.classList.remove('aidr-disabled');
             aidrBadge.setAttribute('aria-pressed', 'true');
-            if (aidrText) aidrText.textContent = 'AIDR Protected';
+            if (aidrText) aidrText.textContent = 'AIDR On';
             isAidrEnabled = true;
 
             updateSetupBanner();
@@ -877,6 +924,10 @@ async function fetchModels() {
 function updateFooterIndicator(provider, model) {
     const providerName = PROVIDER_NAMES[provider] || provider;
     providerIndicator.textContent = `${providerName} · ${model || 'not set'}`;
+    if (headerModelChip) {
+        headerModelChip.textContent = model || 'not set';
+        headerModelChip.title = `${providerName} · ${model || 'not set'}`;
+    }
 }
 
 function updatePersonaBadge(persona) {
@@ -1666,7 +1717,7 @@ async function restoreSavedCredentials() {
                 }
                 aidrBadge.classList.remove('aidr-disabled');
                 aidrBadge.setAttribute('aria-pressed', 'true');
-                if (aidrText) aidrText.textContent = 'AIDR Protected';
+                if (aidrText) aidrText.textContent = 'AIDR On';
                 isAidrEnabled = true;
                 console.log('[Credentials] ✅ AIDR token restored from saved data.');
             }
@@ -2150,6 +2201,50 @@ function buildToolCallCard(tc) {
     return details;
 }
 
+/**
+ * Detector roster rows, shared by the verdict panel and the Guardian panel.
+ * The whole roster the policy evaluated, triggered ones first, so a trigger
+ * stands out against everything that came back clean.
+ */
+function buildDetectorRows(detectors) {
+    const rank = d => (d.detected === true ? 0 : d.detected === null ? 1 : 2);
+    const ordered = [...detectors].sort((a, b) => rank(a) - rank(b));
+
+    return ordered.map(d => {
+        const state = d.detected === true ? 'true'
+            : d.detected === false ? 'false' : 'unknown';
+        const badge = d.detected === true ? 'TRUE'
+            : d.detected === false ? 'FALSE' : '?';
+
+        const meta = [];
+        if (d.confidence !== null && d.confidence !== undefined) {
+            const pct = typeof d.confidence === 'number' && d.confidence <= 1
+                ? `${Math.round(d.confidence * 100)}%`
+                : String(d.confidence);
+            meta.push(`<span class="detector-confidence">${escapeHtml(pct)}</span>`);
+        }
+        if (d.entities && d.entities.length) {
+            meta.push(d.entities.slice(0, 8)
+                .map(e => `<span class="entity-chip">${escapeHtml(e)}</span>`)
+                .join(''));
+        }
+        // Only annotate the rows that carry real detail; a clean detector
+        // shouldn't get a wall of text next to it.
+        const detail = (d.detected === true && d.detail)
+            ? `<div class="detector-detail">${escapeHtml(d.detail)}</div>`
+            : '';
+        return `
+            <li class="detector-item state-${state}">
+                <div class="detector-head">
+                    <span class="detector-flag">${badge}</span>
+                    <code class="detector-name">${escapeHtml(d.name)}</code>
+                    ${meta.join('')}
+                </div>
+                ${detail}
+            </li>`;
+    }).join('');
+}
+
 function buildVerdictPanel(aidr, opts = {}) {
     if (!aidr || !aidr.status) return null;
     if (aidr.status === 'aidr_unavailable') return null;
@@ -2216,44 +2311,7 @@ function buildVerdictPanel(aidr, opts = {}) {
     }
 
     if (detectors.length) {
-        // Show the whole roster the policy evaluated, triggered ones first, so
-        // the trigger stands out against everything that came back clean.
-        const rank = d => (d.detected === true ? 0 : d.detected === null ? 1 : 2);
-        const ordered = [...detectors].sort((a, b) => rank(a) - rank(b));
-
-        const rows = ordered.map(d => {
-            const state = d.detected === true ? 'true'
-                : d.detected === false ? 'false' : 'unknown';
-            const badge = d.detected === true ? 'TRUE'
-                : d.detected === false ? 'FALSE' : '?';
-
-            const meta = [];
-            if (d.confidence !== null && d.confidence !== undefined) {
-                const pct = typeof d.confidence === 'number' && d.confidence <= 1
-                    ? `${Math.round(d.confidence * 100)}%`
-                    : String(d.confidence);
-                meta.push(`<span class="detector-confidence">${escapeHtml(pct)}</span>`);
-            }
-            if (d.entities && d.entities.length) {
-                meta.push(d.entities.slice(0, 8)
-                    .map(e => `<span class="entity-chip">${escapeHtml(e)}</span>`)
-                    .join(''));
-            }
-            // Only annotate the rows that carry real detail — a clean detector
-            // shouldn't get a wall of text next to it.
-            const detail = (d.detected === true && d.detail)
-                ? `<div class="detector-detail">${escapeHtml(d.detail)}</div>`
-                : '';
-            return `
-                <li class="detector-item state-${state}">
-                    <div class="detector-head">
-                        <span class="detector-flag">${badge}</span>
-                        <code class="detector-name">${escapeHtml(d.name)}</code>
-                        ${meta.join('')}
-                    </div>
-                    ${detail}
-                </li>`;
-        }).join('');
+        const rows = buildDetectorRows(detectors);
 
         body.innerHTML += `
             <div class="verdict-row column">
@@ -2403,6 +2461,7 @@ function ingestAidrEvents(events) {
 
 function renderActivity() {
     if (!activityList || !activityStats) return;
+    updateGuardianChrome();
 
     // Header badge
     if (activityCount) {
@@ -2419,6 +2478,7 @@ function renderActivity() {
         activityStats.innerHTML = '';
         activityList.innerHTML =
             '<div class="drawer-empty">No guarded turns yet. Send a message with AIDR enabled to populate the timeline.</div>';
+        renderGuardianDetectors();
         return;
     }
 
@@ -2468,15 +2528,172 @@ function renderActivity() {
             </div>
             ${e.error ? `<div class="verdict-warning"><code>${escapeHtml(e.error)}</code></div>` : ''}
         `;
+
+        // Selecting an event shows its detector roster beneath the timeline.
+        item.tabIndex = 0;
+        item.setAttribute('role', 'button');
+        item.setAttribute('aria-pressed', e.id && e.id === selectedEventId ? 'true' : 'false');
+        if (e.id && e.id === selectedEventId) item.classList.add('selected');
+        const select = () => {
+            selectedEventId = selectedEventId === e.id ? null : e.id;
+            renderActivity();
+        };
+        item.addEventListener('click', select);
+        item.addEventListener('keydown', ev => {
+            if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); select(); }
+        });
         activityList.appendChild(item);
     });
+
+    renderGuardianDetectors();
+}
+
+// ============================================================
+// Guardian panel: pinned in the layout, or collapsed to a rail
+// ============================================================
+let guardianPinned = true;
+let selectedEventId = null;
+
+function isNarrowLayout() {
+    return window.innerWidth <= 1100;
+}
+
+function setGuardianPinned(pinned, { persist = true } = {}) {
+    guardianPinned = !!pinned;
+    appWrapper.classList.toggle('guardian-collapsed', !guardianPinned);
+    appWrapper.classList.remove('guardian-peek');
+    [guardianPinBtn, guardianRailPinBtn].forEach(btn => {
+        if (!btn) return;
+        btn.setAttribute('aria-pressed', guardianPinned ? 'true' : 'false');
+        btn.title = guardianPinned ? 'Pinned: the panel stays open' : 'Pin: keep the panel open';
+    });
+    if (activityBtn) {
+        activityBtn.setAttribute('aria-expanded', guardianPinned && !isNarrowLayout() ? 'true' : 'false');
+    }
+    if (persist) {
+        try { localStorage.setItem(LS_KEYS.GUARDIAN_PINNED, String(guardianPinned)); } catch (e) { /* ignore */ }
+    }
+}
+
+function setGuardianPeek(open) {
+    appWrapper.classList.toggle('guardian-peek', !!open);
+    if (activityBtn) {
+        const shown = (guardianPinned && !isNarrowLayout()) || !!open;
+        activityBtn.setAttribute('aria-expanded', shown ? 'true' : 'false');
+    }
+    if (open) renderActivity();
+}
+
+function toggleGuardian() {
+    // On a wide screen with the panel pinned, the header button collapses it.
+    // Otherwise it toggles the overlay.
+    if (guardianPinned && !isNarrowLayout()) {
+        setGuardianPinned(false);
+        return;
+    }
+    setGuardianPeek(!appWrapper.classList.contains('guardian-peek'));
+}
+
+function initGuardian() {
+    let saved = null;
+    try { saved = localStorage.getItem(LS_KEYS.GUARDIAN_PINNED); } catch (e) { /* ignore */ }
+    setGuardianPinned(saved === null ? true : saved === 'true', { persist: false });
+
+    // Unpinned: hovering the rail or the panel peeks it open; leaving closes it.
+    let leaveTimer = null;
+    const peekOn = () => {
+        if (guardianPinned && !isNarrowLayout()) return;
+        clearTimeout(leaveTimer);
+        setGuardianPeek(true);
+    };
+    const peekOff = () => {
+        if (guardianPinned && !isNarrowLayout()) return;
+        clearTimeout(leaveTimer);
+        leaveTimer = setTimeout(() => setGuardianPeek(false), 300);
+    };
+    [guardianRail, activityPanel].forEach(el => {
+        if (!el) return;
+        el.addEventListener('mouseenter', peekOn);
+        el.addEventListener('mouseleave', peekOff);
+    });
+    window.addEventListener('resize', () => {
+        if (!activityBtn) return;
+        const shown = (guardianPinned && !isNarrowLayout()) || appWrapper.classList.contains('guardian-peek');
+        activityBtn.setAttribute('aria-expanded', shown ? 'true' : 'false');
+    });
+}
+
+/** The parts visible even when collapsed: rail badge, rail dot, live label. */
+function updateGuardianChrome() {
+    const blocked = activityEvents.filter(e => e.status === 'blocked').length;
+    if (guardianRailBadge) {
+        guardianRailBadge.textContent = String(blocked);
+        guardianRailBadge.classList.toggle('hidden', blocked === 0);
+    }
+    const last = activityEvents[activityEvents.length - 1];
+    if (guardianRailDot) {
+        guardianRailDot.className = 'rail-dot' + (last
+            ? ' status-' + (last.status || 'unknown') + (last.transformed ? ' is-transformed' : '')
+            : ' hidden');
+    }
+    const live = isAidrConfigured && isAidrEnabled;
+    const text = !isAidrConfigured ? 'Not connected' : isAidrEnabled ? 'Live' : 'Paused';
+    if (guardianLiveText) guardianLiveText.textContent = text;
+    if (guardianLive) guardianLive.classList.toggle('is-off', !live);
+    if (guardianRailLabel) guardianRailLabel.textContent = text.toLowerCase();
+    if (guardianRailLiveDot) guardianRailLiveDot.classList.toggle('is-off', !live);
+}
+
+/** Detector roster for the selected event, else the latest event that has one. */
+function renderGuardianDetectors() {
+    if (!guardianDetectors) return;
+    const newestFirst = [...activityEvents].reverse();
+    const pick = activityEvents.find(e => e.id === selectedEventId)
+        || newestFirst.find(e => firedDetectors(e).length)
+        || newestFirst.find(e => allDetectors(e).length)
+        || null;
+    if (!pick) {
+        guardianDetectors.innerHTML = '';
+        guardianDetectors.classList.add('hidden');
+        return;
+    }
+    const detectors = allDetectors(pick);
+    const fired = firedDetectors(pick).length;
+    guardianDetectors.classList.remove('hidden');
+    guardianDetectors.innerHTML = `
+        <div class="guardian-section-title">
+            Detectors
+            <span class="guardian-section-sub">${escapeHtml(pick.phase || '')}${pick.tool ? ' · ' + escapeHtml(pick.tool) : ''}</span>
+            <span class="${fired ? 'verdict-chip danger' : 'verdict-chip'}">${fired} of ${detectors.length} fired</span>
+        </div>
+        <ul class="detector-list">${buildDetectorRows(detectors)}</ul>`;
+}
+
+// ============================================================
+// Header overflow menu
+// ============================================================
+function toggleHeaderMenu() {
+    if (!headerMenu) return;
+    if (headerMenu.classList.contains('hidden')) openHeaderMenu();
+    else closeHeaderMenu();
+}
+
+function openHeaderMenu() {
+    headerMenu.classList.remove('hidden');
+    if (headerMenuBtn) headerMenuBtn.setAttribute('aria-expanded', 'true');
+    focusFirstIn(headerMenu);
+}
+
+function closeHeaderMenu() {
+    if (!headerMenu) return;
+    headerMenu.classList.add('hidden');
+    if (headerMenuBtn) headerMenuBtn.setAttribute('aria-expanded', 'false');
 }
 
 // ============================================================
 // Drawers (activity / red-team / compare)
 // ============================================================
 const DRAWERS = {
-    activity: () => ({ panel: activityPanel, overlay: activityOverlay, btn: activityBtn }),
     redteam: () => ({ panel: redteamPanel, overlay: redteamOverlay, btn: redteamBtn }),
     compare: () => ({ panel: comparePanel, overlay: compareOverlay, btn: null }),
 };
@@ -2512,7 +2729,6 @@ function toggleDrawer(name) {
     // Only one drawer at a time
     Object.keys(DRAWERS).forEach(k => { if (k !== name) closeDrawer(k); });
     if (name === 'redteam') loadRedteam();
-    if (name === 'activity') renderActivity();
     openDrawer(name);
 }
 
