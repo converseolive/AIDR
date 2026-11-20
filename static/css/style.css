@@ -426,6 +426,13 @@ button, input, select, textarea {
     align-items: center;
     gap: 10px;
     min-width: 0;
+    flex: 1 1 auto;
+    /* The controls on the right keep their size; this side gives way and
+       clips cleanly instead of sliding underneath them. The padding keeps
+       focus rings inside the clip. */
+    overflow: hidden;
+    padding: 4px;
+    margin: -4px;
 }
 
 .logo-area {
@@ -465,6 +472,7 @@ button, input, select, textarea {
     letter-spacing: -0.01em;
     color: var(--text-primary);
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .persona-badge {
@@ -478,6 +486,8 @@ button, input, select, textarea {
     font-weight: 500;
     color: var(--text-secondary);
     white-space: nowrap;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .persona-badge::before {
@@ -486,9 +496,11 @@ button, input, select, textarea {
     height: 6px;
     border-radius: 50%;
     background: var(--persona-color, var(--text-muted));
+    flex-shrink: 0;
 }
 
 .header-right {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 8px;

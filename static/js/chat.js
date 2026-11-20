@@ -49,6 +49,7 @@ const gatewayGroup = document.getElementById('gatewayGroup');
 const gatewayCloudSelect = document.getElementById('gatewayCloudSelect');
 const gatewayUrlInput = document.getElementById('gatewayUrlInput');
 const apiKeyHint = document.getElementById('apiKeyHint');
+const modelHint = document.getElementById('modelHint');
 const modelSelect = document.getElementById('modelSelect');
 const personaSelect = document.getElementById('personaSelect');
 const personaHint = document.getElementById('personaHint');
@@ -763,7 +764,8 @@ async function loadSettings() {
         // Set model after fetching model list
         await fetchModels();
         if (data.model) {
-            modelSelect.value = data.model;
+            selectModel(data.model);
+            await syncGatewayModelId(data.model);
         }
 
         // Persona hint
@@ -862,6 +864,15 @@ async function saveSettings() {
             }
             if (settings.api_key) {
                 localStorage.setItem(LS_KEYS.API_KEY, settings.api_key);
+            }
+
+            // The gateway's real IDs can only be read once its key is saved.
+            // Re-read them now and move a prefill name onto its gateway ID,
+            // so what is stored is always in <provider-slug>/<model-name> form.
+            if (settings.provider === 'falcon_gateway') {
+                await fetchModels();
+                await syncGatewayModelId(settings.model);
+                if (modelSelect.value) settings.model = modelSelect.value;
             }
 
             // Visual feedback
@@ -989,8 +1000,68 @@ function onProviderChange() {
     fetchModels();
 }
 
+/** The <model-name> part of a gateway <provider-slug>/<model-name> ID. */
+function modelNameOf(id) {
+    return String(id || '').split('/').pop().trim().toLowerCase();
+}
+
+/**
+ * Select a model by exact ID, or failing that by model name. The gateway
+ * lists IDs as <provider-slug>/<model-name>, so a saved bare name has to
+ * land on its full ID rather than leave the picker blank.
+ */
+function selectModel(value) {
+    if (!value) return false;
+    const options = [...modelSelect.options].filter(o => o.value && !o.disabled);
+    const exact = options.find(o => o.value === value);
+    const byName = exact || options.find(o => modelNameOf(o.value) === modelNameOf(value));
+    if (!byName) return false;
+    modelSelect.value = byName.value;
+    return true;
+}
+
+/**
+ * If the picker landed on a gateway ID that differs from what is stored (a
+ * bare prefill name from before the key was saved), store the gateway ID so
+ * the saved model is always in <provider-slug>/<model-name> form.
+ */
+async function syncGatewayModelId(storedModel) {
+    const provider = providerSelect.value;
+    const selected = modelSelect.value;
+    if (provider !== 'falcon_gateway' || !selected || selected === storedModel) return;
+    if (!selected.includes('/')) return; // still the prefill, nothing better to store
+    try {
+        await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: selected }),
+        });
+        localStorage.setItem(LS_KEYS.MODEL, selected);
+        updateFooterIndicator(provider, selected);
+    } catch (e) {
+        console.warn('Could not store the gateway model ID:', e);
+    }
+}
+
+function setModelHint(provider, data) {
+    if (!modelHint) return;
+    let text = '';
+    if (provider === 'falcon_gateway') {
+        if (data && data.source === 'live') {
+            text = 'Live from the gateway. IDs are in the provider/model form it requires.';
+        } else if (data && data.warning) {
+            text = `Could not read the gateway's model list (${data.warning}). Showing the prefill; a name is matched to its gateway ID when you send.`;
+        } else {
+            text = 'Prefill only. Save your gateway key and refresh to load the gateway\'s own provider/model IDs.';
+        }
+    }
+    modelHint.textContent = text;
+    modelHint.classList.toggle('hidden', !text);
+}
+
 async function fetchModels() {
     const provider = providerSelect.value;
+    const previous = modelSelect.value;
     refreshModelsBtn.classList.add('spinning');
 
     try {
@@ -1026,7 +1097,10 @@ async function fetchModels() {
                 opt.textContent = model;
                 modelSelect.appendChild(opt);
             });
+            // Keep the current choice across a refresh where it still exists.
+            selectModel(previous);
         }
+        setModelHint(provider, data);
     } catch (e) {
         console.warn('Could not fetch models:', e);
     } finally {
@@ -1038,7 +1112,11 @@ function updateFooterIndicator(provider, model) {
     const providerName = PROVIDER_NAMES[provider] || provider;
     providerIndicator.textContent = `${providerName} · ${model || 'not set'}`;
     if (headerModelChip) {
-        headerModelChip.textContent = model || 'not set';
+        // Gateway IDs are <provider-slug>/<model-name>. The chip is short on
+        // room, so it shows the model name; the full ID is in the tooltip
+        // and the footer.
+        const shortName = model ? String(model).split('/').pop() : '';
+        headerModelChip.textContent = shortName || 'not set';
         headerModelChip.title = `${providerName} · ${model || 'not set'}`;
     }
     // The provider decides whether "AIDR off" still means guarded.
@@ -1841,11 +1919,12 @@ async function restoreSavedCredentials() {
     // Restore model selection after fetching models
     if (savedModel) {
         await fetchModels();
-        modelSelect.value = savedModel;
+        selectModel(savedModel);
         updateFooterIndicator(
             savedProvider || providerSelect.value,
-            savedModel
+            modelSelect.value || savedModel
         );
+        await syncGatewayModelId(savedModel);
     }
 
     // Re-connect AIDR if we have a saved token

@@ -1473,10 +1473,105 @@ def falcon_gateway_openai_url(gateway_url):
     return f"{root}/openai/v1"
 
 
+_GATEWAY_MODELS_CACHE = {}   # (api_key, base_url) -> (fetched_at, [ids])
+_GATEWAY_MODELS_TTL = 300    # seconds
+
+
+def gateway_model_ids(api_key, gateway_url=None, refresh=False):
+    """
+    Model IDs exactly as the gateway's models endpoint returns them.
+
+    The gateway only accepts IDs in <provider-slug>/<model-name> form and
+    says to use what this endpoint lists, so this is the source of truth for
+    both the picker and the call. Cached briefly so a chat turn doesn't pay
+    for a lookup every time.
+    """
+    base_url = falcon_gateway_openai_url(gateway_url)
+    key = (api_key, base_url)
+    cached = _GATEWAY_MODELS_CACHE.get(key)
+    if cached and not refresh and time.time() - cached[0] < _GATEWAY_MODELS_TTL:
+        return cached[1]
+
+    try:
+        ids = [m.id for m in _openai_client(api_key, base_url).models.list()]
+    except Exception as sdk_error:
+        # The listing may not be in the exact shape the SDK expects. Read it
+        # directly and accept the common layouts before giving up.
+        import requests as req
+        resp = req.get(
+            f"{base_url}/models",
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=10,
+        )
+        if resp.status_code >= 400:
+            raise sdk_error
+        payload = resp.json()
+        rows = payload
+        if isinstance(payload, dict):
+            rows = payload.get("data") or payload.get("models") or []
+        ids = []
+        for row in rows or []:
+            if isinstance(row, str):
+                ids.append(row)
+            elif isinstance(row, dict):
+                ids.append(row.get("id") or row.get("name") or "")
+
+    ids = [i for i in dict.fromkeys(ids) if i]
+    _GATEWAY_MODELS_CACHE[key] = (time.time(), ids)
+    return ids
+
+
+def _gateway_model_name(model_id):
+    """The <model-name> part of a <provider-slug>/<model-name> ID."""
+    return (model_id or "").split("/")[-1].strip().lower()
+
+
+def order_gateway_models(ids, preferred):
+    """Gateway IDs with the preferred model names first, in preferred order."""
+    ordered = []
+    for name in preferred:
+        wanted = _gateway_model_name(name)
+        ordered += [i for i in ids if _gateway_model_name(i) == wanted and i not in ordered]
+    return ordered + [i for i in ids if i not in ordered]
+
+
+def resolve_gateway_model(model, api_key, gateway_url=None):
+    """
+    Turn whatever is selected into an ID the gateway accepts.
+
+    An ID the gateway lists is used as is. A bare name ("gemini-4-hydrogen")
+    is matched to the listed ID with that model name. If the gateway's list
+    can't be read the name goes through unchanged and the gateway answers
+    for itself; if it can be read and nothing matches, say what is available
+    rather than sending a call that is certain to 404.
+    """
+    try:
+        ids = gateway_model_ids(api_key, gateway_url)
+    except Exception as e:
+        print(f"[GATEWAY] Could not read the models endpoint: {e}")
+        return model
+    if not ids or model in ids:
+        return model
+
+    wanted = _gateway_model_name(model)
+    matches = [i for i in ids if _gateway_model_name(i) == wanted]
+    if matches:
+        return matches[0]
+
+    shown = ", ".join(ids[:12]) + (" …" if len(ids) > 12 else "")
+    raise ValueError(
+        f"'{model}' is not a model this gateway exposes. "
+        f"Pick one from Settings (refresh the list). Available: {shown}"
+    )
+
+
 def call_falcon_gateway(messages, api_key, model, gateway_url=None):
     """Chat Completions through the Falcon AI Gateway. Returns (text, usage)."""
     return call_openai(
-        messages, api_key, model, base_url=falcon_gateway_openai_url(gateway_url)
+        messages,
+        api_key,
+        resolve_gateway_model(model, api_key, gateway_url),
+        base_url=falcon_gateway_openai_url(gateway_url),
     )
 
 
@@ -1785,12 +1880,9 @@ def _live_gemma_models(api_key):
 
 
 def _live_falcon_gateway_models(api_key):
-    # The gateway may front non-OpenAI models, so don't filter by name.
-    return _live_openai_models(
-        api_key,
-        base_url=falcon_gateway_openai_url(session.get("gateway_url")),
-        chat_only=False,
-    )
+    # The gateway's own IDs (<provider-slug>/<model-name>), unfiltered: it
+    # may front any provider. The refresh button always re-reads them.
+    return gateway_model_ids(api_key, session.get("gateway_url"), refresh=True)
 
 
 _LIVE_MODEL_FETCHERS = {
@@ -1842,6 +1934,13 @@ def get_models():
         try:
             live = fetcher(api_key)
             if live:
+                if provider == "falcon_gateway":
+                    # Only the gateway's own IDs are valid, so the picker
+                    # shows those and nothing else, favourites first.
+                    return jsonify({
+                        "models": order_gateway_models(live, fallback),
+                        "source": "live",
+                    })
                 # Keep curated favourites at the top, then everything else.
                 ordered = [m for m in fallback if m in live]
                 ordered += [m for m in live if m not in ordered]
