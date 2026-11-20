@@ -700,13 +700,14 @@ DEFAULT_MODELS = {
         "gemma-3n-e4b-it",
     ],
     "ollama": [],  # Fetched dynamically from the Ollama instance
-    # The gateway proxies whatever the tenant has enabled; this is only the
-    # fallback when its /models endpoint can't be read.
+    # The gateway proxies whatever the tenant has enabled. This tenant fronts
+    # Gemini, so that's the prefill; the refresh button replaces it with the
+    # gateway's live /models list whenever a key is saved.
     "falcon_gateway": [
-        "gpt-5.1",
-        "gpt-5-mini",
-        "gpt-4.1",
-        "gpt-4o-mini",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.0-flash",
     ],
 }
 
