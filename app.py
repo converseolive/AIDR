@@ -704,10 +704,13 @@ DEFAULT_MODELS = {
     # Gemini, so that's the prefill; the refresh button replaces it with the
     # gateway's live /models list whenever a key is saved.
     "falcon_gateway": [
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash",
+        "gemini-4-hydrogen",
+        "gemma-4-31b-it",
+        "gemma-4-26b-a4b-it",
+        "gemma-3-27b-it",
+        "gemma-3-12b-it",
+        "gemma-3-4b-it",
+        "gemma-3n-e4b-it",
     ],
 }
 
