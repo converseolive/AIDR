@@ -535,6 +535,26 @@ button, input, select, textarea {
     opacity: 0.6;
 }
 
+/* In-app AIDR off, but the Falcon AI Gateway guards the model call inline. */
+.aidr-badge.aidr-disabled.aidr-gateway {
+    background: var(--accent-bg);
+    border-color: transparent;
+    color: var(--accent-primary);
+}
+
+.aidr-badge.aidr-disabled.aidr-gateway:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.aidr-badge.aidr-disabled.aidr-gateway .shield-icon {
+    opacity: 1;
+}
+
+.aidr-indicator.aidr-gateway .aidr-dot {
+    background: var(--accent-primary);
+}
+
 .aidr-badge.tools-badge {
     background: var(--accent-bg);
     color: var(--accent-primary);

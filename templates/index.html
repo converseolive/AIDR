@@ -92,7 +92,21 @@
                     <option value="anthropic">Anthropic (Claude)</option>
                     <option value="gemini">Google Gemini</option>
                     <option value="ollama">Ollama (Self-Hosted)</option>
+                    <option value="falcon_gateway">Falcon AI Gateway (CrowdStrike)</option>
                 </select>
+            </div>
+
+            <!-- Falcon AI Gateway endpoint -->
+            <div class="settings-group hidden" id="gatewayGroup">
+                <label class="settings-label" for="gatewayCloudSelect">Gateway endpoint</label>
+                <select id="gatewayCloudSelect" class="settings-select">
+                    <option value="https://aigateway.us-1.crowdstrike.com">US-1 · aigateway.us-1.crowdstrike.com</option>
+                    <option value="https://aigateway.us-2.crowdstrike.com" selected>US-2 · aigateway.us-2.crowdstrike.com</option>
+                    <option value="https://aigateway.eu-1.crowdstrike.com">EU-1 · aigateway.eu-1.crowdstrike.com</option>
+                    <option value="custom">Custom URL…</option>
+                </select>
+                <input type="url" id="gatewayUrlInput" class="settings-input hidden" placeholder="https://aigateway.<cloud>.crowdstrike.com" autocomplete="off" style="margin-top: 8px;">
+                <span class="settings-hint">Use the cloud your CID is in. Gateway keys only work in the cloud they were created in. Requests go to <code>/openai/v1</code> on this host.</span>
             </div>
 
             <!-- API Key -->
@@ -107,7 +121,7 @@
                         </svg>
                     </button>
                 </div>
-                <span class="settings-hint">Your key is saved locally in this browser for convenience.</span>
+                <span class="settings-hint" id="apiKeyHint">Your key is saved locally in this browser for convenience.</span>
             </div>
 
             <!-- Ollama URL -->

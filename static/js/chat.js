@@ -45,6 +45,10 @@ const apiKeyInput = document.getElementById('apiKeyInput');
 const apiKeyGroup = document.getElementById('apiKeyGroup');
 const ollamaUrlGroup = document.getElementById('ollamaUrlGroup');
 const ollamaUrlInput = document.getElementById('ollamaUrlInput');
+const gatewayGroup = document.getElementById('gatewayGroup');
+const gatewayCloudSelect = document.getElementById('gatewayCloudSelect');
+const gatewayUrlInput = document.getElementById('gatewayUrlInput');
+const apiKeyHint = document.getElementById('apiKeyHint');
 const modelSelect = document.getElementById('modelSelect');
 const personaSelect = document.getElementById('personaSelect');
 const personaHint = document.getElementById('personaHint');
@@ -158,6 +162,7 @@ const LS_KEYS = {
     MODEL: 'aidr_app_model',
     PERSONA: 'aidr_app_persona',
     OLLAMA_URL: 'aidr_app_ollama_url',
+    GATEWAY_URL: 'aidr_app_gateway_url',
     TOOLS: 'aidr_app_tools',
     POISON_URL: 'aidr_app_poison_url',
     GUARDIAN_PINNED: 'aidr_app_guardian_pinned',
@@ -184,6 +189,12 @@ const PROVIDER_NAMES = {
     anthropic: 'Anthropic',
     gemini: 'Google Gemini',
     ollama: 'Ollama',
+    falcon_gateway: 'Falcon AI Gateway',
+};
+
+const API_KEY_HINTS = {
+    default: 'Your key is saved locally in this browser for convenience.',
+    falcon_gateway: 'Your Falcon AI Gateway API key. It is saved locally in this browser for convenience.',
 };
 
 const WELCOME_CARDS = {
@@ -322,6 +333,22 @@ function setupEventListeners() {
         }
     });
 
+    // Gateway cloud picker: a custom choice reveals the URL box; any change
+    // re-fetches the model list against the new endpoint.
+    if (gatewayCloudSelect) {
+        gatewayCloudSelect.addEventListener('change', () => {
+            syncGatewayUrlField();
+            if (providerSelect.value === 'falcon_gateway' && gatewayCloudSelect.value !== 'custom') {
+                fetchModels();
+            }
+        });
+    }
+    if (gatewayUrlInput) {
+        gatewayUrlInput.addEventListener('change', () => {
+            if (providerSelect.value === 'falcon_gateway') fetchModels();
+        });
+    }
+
     // Clear chat
     clearChatBtn.addEventListener('click', clearChat);
 
@@ -350,9 +377,6 @@ function setupEventListeners() {
     // Toggle AIDR
     if (aidrBadge) {
         aidrBadge.addEventListener('click', () => {
-            const aidrIndicator = document.getElementById('aidrIndicator');
-            const aidrIndicatorText = document.getElementById('aidrIndicatorText');
-
             if (!isAidrEnabled) {
                 // Trying to ENABLE — check if AIDR is configured
                 if (!isAidrConfigured) {
@@ -362,20 +386,10 @@ function setupEventListeners() {
                     return;
                 }
                 isAidrEnabled = true;
-                aidrBadge.classList.remove('aidr-disabled');
-                aidrBadge.setAttribute('aria-pressed', 'true');
-                if (aidrText) aidrText.textContent = 'AIDR On';
-                if (aidrIndicator) aidrIndicator.classList.remove('aidr-off');
-                if (aidrIndicatorText) aidrIndicatorText.textContent = 'AIDR Active';
             } else {
-                // Disabling
                 isAidrEnabled = false;
-                aidrBadge.classList.add('aidr-disabled');
-                aidrBadge.setAttribute('aria-pressed', 'false');
-                if (aidrText) aidrText.textContent = 'AIDR Off';
-                if (aidrIndicator) aidrIndicator.classList.add('aidr-off');
-                if (aidrIndicatorText) aidrIndicatorText.textContent = 'AIDR Inactive';
             }
+            refreshProtectionUi();
             renderActivity(); // the Guardian panel's live label follows this toggle
         });
     }
@@ -692,7 +706,8 @@ function updateSetupBanner() {
 
     const provider = providerSelect ? providerSelect.value : 'openai';
     const needsApiKey = provider !== 'ollama' && !hasApiKey;
-    const needsAidr = !isAidrConfigured;
+    // Behind the gateway, policy is enforced there; an AIDR token is optional.
+    const needsAidr = !isAidrConfigured && provider !== 'falcon_gateway';
 
     if (!needsApiKey && !needsAidr) {
         // Everything is configured — hide the banner
@@ -736,6 +751,7 @@ async function loadSettings() {
         providerSelect.value = data.provider || 'openai';
         personaSelect.value = data.persona || 'customer_support';
         ollamaUrlInput.value = data.ollama_url || 'http://localhost:11434';
+        if (data.gateway_url) setGatewayUrl(data.gateway_url);
         hasApiKey = data.has_api_key || false;
 
         // Update UI based on provider
@@ -808,6 +824,7 @@ async function saveSettings() {
         model: modelSelect.value,
         persona: personaSelect.value,
         ollama_url: ollamaUrlInput.value,
+        gateway_url: currentGatewayUrl(),
     };
 
     // Only send api_key if the user actually entered a new one.
@@ -840,6 +857,9 @@ async function saveSettings() {
             localStorage.setItem(LS_KEYS.MODEL, settings.model);
             localStorage.setItem(LS_KEYS.PERSONA, settings.persona);
             localStorage.setItem(LS_KEYS.OLLAMA_URL, settings.ollama_url);
+            if (settings.gateway_url) {
+                localStorage.setItem(LS_KEYS.GATEWAY_URL, settings.gateway_url);
+            }
             if (settings.api_key) {
                 localStorage.setItem(LS_KEYS.API_KEY, settings.api_key);
             }
@@ -882,17 +902,88 @@ async function saveSettings() {
     }
 }
 
+// ============================================================
+// Protection mode
+//
+// Three states: in-app AIDR on (the app calls the guard around every turn),
+// gateway (in-app AIDR off, but the Falcon AI Gateway enforces policy inline
+// on the model call itself), or off. The toggle only flips in-app AIDR; the
+// gateway state follows from the provider.
+// ============================================================
+function protectionMode() {
+    if (isAidrEnabled) return 'aidr';
+    if (currentProvider() === 'falcon_gateway') return 'gateway';
+    return 'off';
+}
+
+/** True when some guard is in the path, in-app or at the gateway. */
+function guardIsActive() {
+    return protectionMode() !== 'off';
+}
+
+function refreshProtectionUi() {
+    const mode = protectionMode();
+    const aidrIndicator = document.getElementById('aidrIndicator');
+    const aidrIndicatorText = document.getElementById('aidrIndicatorText');
+
+    if (aidrBadge) {
+        aidrBadge.classList.toggle('aidr-disabled', mode !== 'aidr');
+        aidrBadge.classList.toggle('aidr-gateway', mode === 'gateway');
+        aidrBadge.setAttribute('aria-pressed', mode === 'aidr' ? 'true' : 'false');
+        aidrBadge.title = mode === 'gateway'
+            ? 'In-app AIDR is off. The Falcon AI Gateway enforces policy on every model call. Click to add in-app AIDR as well.'
+            : 'Toggle CrowdStrike AIDR protection';
+    }
+    if (aidrText) {
+        aidrText.textContent = mode === 'aidr' ? 'AIDR On' : mode === 'gateway' ? 'AIDR Off · Gateway' : 'AIDR Off';
+    }
+    if (aidrIndicator) {
+        aidrIndicator.classList.toggle('aidr-off', mode === 'off');
+        aidrIndicator.classList.toggle('aidr-gateway', mode === 'gateway');
+    }
+    if (aidrIndicatorText) {
+        aidrIndicatorText.textContent = mode === 'aidr' ? 'AIDR Active'
+            : mode === 'gateway' ? 'Guarded at gateway' : 'AIDR Inactive';
+    }
+}
+
+/** The gateway endpoint from the picker, or the custom box when chosen. */
+function currentGatewayUrl() {
+    if (!gatewayCloudSelect) return '';
+    if (gatewayCloudSelect.value === 'custom') {
+        return gatewayUrlInput ? gatewayUrlInput.value.trim() : '';
+    }
+    return gatewayCloudSelect.value;
+}
+
+/** Point the picker at a saved endpoint, falling back to the custom box. */
+function setGatewayUrl(url) {
+    if (!gatewayCloudSelect || !url) return;
+    const known = [...gatewayCloudSelect.options].some(o => o.value === url);
+    if (known) {
+        gatewayCloudSelect.value = url;
+    } else {
+        gatewayCloudSelect.value = 'custom';
+        if (gatewayUrlInput) gatewayUrlInput.value = url;
+    }
+    syncGatewayUrlField();
+}
+
+function syncGatewayUrlField() {
+    if (!gatewayCloudSelect || !gatewayUrlInput) return;
+    gatewayUrlInput.classList.toggle('hidden', gatewayCloudSelect.value !== 'custom');
+}
+
 function onProviderChange() {
     const provider = providerSelect.value;
 
-    // Show/hide API key group (not needed for Ollama)
-    if (provider === 'ollama') {
-        apiKeyGroup.classList.add('hidden');
-        ollamaUrlGroup.classList.remove('hidden');
-    } else {
-        apiKeyGroup.classList.remove('hidden');
-        ollamaUrlGroup.classList.add('hidden');
-    }
+    // Ollama needs a server URL and no key; the gateway needs a cloud and a
+    // key; everyone else needs a key only.
+    apiKeyGroup.classList.toggle('hidden', provider === 'ollama');
+    ollamaUrlGroup.classList.toggle('hidden', provider !== 'ollama');
+    if (gatewayGroup) gatewayGroup.classList.toggle('hidden', provider !== 'falcon_gateway');
+    if (apiKeyHint) apiKeyHint.textContent = API_KEY_HINTS[provider] || API_KEY_HINTS.default;
+    syncGatewayUrlField();
 
     // Fetch models for the selected provider
     fetchModels();
@@ -906,6 +997,9 @@ async function fetchModels() {
         let url = `/api/models?provider=${provider}`;
         if (provider === 'ollama' && ollamaUrlInput.value.trim()) {
             url += `&ollama_url=${encodeURIComponent(ollamaUrlInput.value.trim())}`;
+        }
+        if (provider === 'falcon_gateway' && currentGatewayUrl()) {
+            url += `&gateway_url=${encodeURIComponent(currentGatewayUrl())}`;
         }
         const resp = await fetch(url);
         const data = await resp.json();
@@ -947,6 +1041,9 @@ function updateFooterIndicator(provider, model) {
         headerModelChip.textContent = model || 'not set';
         headerModelChip.title = `${providerName} · ${model || 'not set'}`;
     }
+    // The provider decides whether "AIDR off" still means guarded.
+    refreshProtectionUi();
+    renderActivity();
 }
 
 function updatePersonaBadge(persona) {
@@ -1376,12 +1473,15 @@ function appendBlockedMessage(message, blockType, aidr = null, toolCalls = null,
     const contentEl = document.createElement('div');
     contentEl.className = 'message-content';
 
+    const blockTitle = blockType === 'gateway'
+        ? 'Falcon AI Gateway — Blocked Inline'
+        : `AIDR Security — ${blockType === 'input' ? 'Input Blocked' : 'Output Blocked'}`;
     const headerHTML = `
         <div class="blocked-header">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
             </svg>
-            AIDR Security — ${blockType === 'input' ? 'Input Blocked' : 'Output Blocked'}
+            ${escapeHtml(blockTitle)}
         </div>
     `;
 
@@ -1680,15 +1780,17 @@ async function restoreSavedCredentials() {
     const savedModel = localStorage.getItem(LS_KEYS.MODEL);
     const savedPersona = localStorage.getItem(LS_KEYS.PERSONA);
     const savedOllamaUrl = localStorage.getItem(LS_KEYS.OLLAMA_URL);
+    const savedGatewayUrl = localStorage.getItem(LS_KEYS.GATEWAY_URL);
     const savedApiKey = localStorage.getItem(LS_KEYS.API_KEY);
     const savedAidrToken = localStorage.getItem(LS_KEYS.AIDR_TOKEN);
     const savedAidrBaseUrl = localStorage.getItem(LS_KEYS.AIDR_BASE_URL);
 
-    // Restore form field values (Ollama URL first, so onProviderChange()
-    // fetches models against the saved server rather than an empty field)
+    // Restore form field values (server URLs first, so onProviderChange()
+    // fetches models against the saved endpoint rather than an empty field)
     if (savedOllamaUrl && ollamaUrlInput) {
         ollamaUrlInput.value = savedOllamaUrl;
     }
+    if (savedGatewayUrl) setGatewayUrl(savedGatewayUrl);
     if (savedProvider && providerSelect) {
         providerSelect.value = savedProvider;
         onProviderChange();
@@ -1713,6 +1815,7 @@ async function restoreSavedCredentials() {
                 model: savedModel || modelSelect.value,
                 persona: savedPersona || personaSelect.value,
                 ollama_url: savedOllamaUrl || ollamaUrlInput.value,
+                gateway_url: savedGatewayUrl || currentGatewayUrl(),
             };
             if (savedApiKey) {
                 settings.api_key = savedApiKey;
@@ -1794,6 +1897,11 @@ function forgetSavedCredentials() {
     if (apiKeyInput) apiKeyInput.value = '';
     if (aidrTokenInput) aidrTokenInput.value = '';
     if (aidrBaseUrlSelect) aidrBaseUrlSelect.value = 'https://api.us-2.crowdstrike.com/aidr/aiguard';
+    if (gatewayCloudSelect) {
+        gatewayCloudSelect.value = 'https://aigateway.us-2.crowdstrike.com';
+        if (gatewayUrlInput) gatewayUrlInput.value = '';
+        syncGatewayUrlField();
+    }
 
     // Reset AIDR button state
     if (aidrConnectBtn) {
@@ -2010,6 +2118,16 @@ async function switchChat(id) {
                     appendBlockedMessage(
                         '⚠️ Your message was blocked by CrowdStrike AIDR security.',
                         'input',
+                        msg.aidr
+                    );
+                    lastUserAidr = null;
+                    return;
+                }
+                if (msg.blocked === 'gateway') {
+                    appendMessage('user', msg.content);
+                    appendBlockedMessage(
+                        '⚠️ Blocked by the Falcon AI Gateway: ' + ((msg.aidr && msg.aidr.message) || 'policy violation'),
+                        'gateway',
                         msg.aidr
                     );
                     lastUserAidr = null;
@@ -2426,7 +2544,11 @@ function buildVerdictPanel(aidr, opts = {}) {
         bits.push(`<span class="${cls}">${fired.length} of ${detectors.length} fired</span>`);
     }
     if (aidr.detectors_unknown) {
-        bits.push('<span class="verdict-chip warn">verdict unread</span>');
+        // A gateway block is a complete verdict with no roster; "unread" is
+        // reserved for an AIDR reply we couldn't parse.
+        bits.push(aidr.message
+            ? '<span class="verdict-chip danger">inline block</span>'
+            : '<span class="verdict-chip warn">verdict unread</span>');
     }
     if (aidr.latency_ms !== undefined && aidr.latency_ms !== null) {
         bits.push(`<span class="verdict-latency">${aidr.latency_ms} ms</span>`);
@@ -2452,6 +2574,16 @@ function buildVerdictPanel(aidr, opts = {}) {
             <div class="verdict-row">
                 <span class="verdict-key">Policy</span>
                 <span class="verdict-val">${escapeHtml(aidr.policy)}</span>
+            </div>`;
+    }
+
+    // An inline gateway block carries the gateway's own message and status
+    // rather than a detector roster.
+    if (aidr.message) {
+        body.innerHTML += `
+            <div class="verdict-row column">
+                <span class="verdict-key">Gateway response${aidr.http_status ? ` · HTTP ${escapeHtml(String(aidr.http_status))}` : ''}</span>
+                <pre class="tool-call-pre">${escapeHtml(aidr.message)}</pre>
             </div>`;
     }
 
@@ -2667,11 +2799,12 @@ function renderActivity() {
                 ${e.policy ? `<span class="verdict-chip">${escapeHtml(e.policy)}</span>` : ''}
                 ${fired.length
                     ? fired.map(n => `<span class="entity-chip">${escapeHtml(n)}</span>`).join('')
-                    : `<span class="verdict-val muted">${total ? `0 of ${total} fired` : 'no detectors'}</span>`}
+                    : `<span class="verdict-val muted">${total ? `0 of ${total} fired` : e.detectors_unknown ? 'detectors not reported' : 'no detectors'}</span>`}
                 ${e.transformed ? '<span class="verdict-chip warn">redacted</span>' : ''}
                 ${typeof e.latency_ms === 'number' ? `<span class="activity-time">${e.latency_ms} ms</span>` : ''}
             </div>
             ${e.error ? `<div class="verdict-warning"><code>${escapeHtml(e.error)}</code></div>` : ''}
+            ${e.message && e.phase === 'gateway' ? `<div class="activity-preview">Gateway: ${escapeHtml(e.message)}</div>` : ''}
         `;
 
         // Selecting an event shows its detector roster beneath the timeline.
@@ -2782,7 +2915,10 @@ function updateGuardianChrome() {
             : ' hidden');
     }
     const live = isAidrConfigured && isAidrEnabled;
-    const text = !isAidrConfigured ? 'Not connected' : isAidrEnabled ? 'Live' : 'Paused';
+    const mode = protectionMode();
+    const text = mode === 'aidr' ? 'Live'
+        : mode === 'gateway' ? 'Gateway'
+        : !isAidrConfigured ? 'Not connected' : 'Paused';
     if (guardianLiveText) guardianLiveText.textContent = text;
     if (guardianLive) guardianLive.classList.toggle('is-off', !live);
     if (guardianRailLabel) guardianRailLabel.textContent = text.toLowerCase();
@@ -2962,6 +3098,15 @@ function evaluateScenario(p, data) {
             latency: hit.latency_ms,
         };
     }
+    // The gateway blocks inline without naming detectors, so any gateway
+    // block on a turn that expected one counts as the expectation met.
+    const gatewayBlock = events.find(e => e.phase === 'gateway' && e.status === 'blocked');
+    if (gatewayBlock) {
+        return {
+            result: 'pass',
+            note: `Blocked inline by the Falcon AI Gateway (expected ${detector}; the gateway does not report detector names).`,
+        };
+    }
     if (events.some(e => e.status === 'aidr_error')) {
         const err = events.find(e => e.status === 'aidr_error');
         return { result: 'error', note: err.error || 'The guard could not be reached.' };
@@ -3001,7 +3146,7 @@ async function ensureScenarioChat() {
 }
 
 function scenarioPreconditions(p) {
-    if (!isAidrEnabled) return 'Turn AIDR on first: a scenario is only meaningful with the guard running.';
+    if (!guardIsActive()) return 'Turn AIDR on first: a scenario is only meaningful with the guard running.';
     if (p.needs_tools && (!isToolsEnabled || currentProvider() !== 'anthropic')) {
         return 'This scenario needs Tools on and the Anthropic provider.';
     }
@@ -3015,7 +3160,7 @@ async function runScenario(p) {
     if (blocker) {
         scenarioResults[id] = { result: 'skipped', note: blocker, at: Date.now() };
         renderRedteam(currentScenarios);
-        if (!isAidrEnabled) showAidrError(blocker);
+        if (!guardIsActive()) showAidrError(blocker);
         return;
     }
     scenarioRunning = true;
@@ -3035,7 +3180,7 @@ async function runScenario(p) {
 
 async function runAllScenarios() {
     if (scenarioRunning) return;
-    if (!isAidrEnabled) {
+    if (!guardIsActive()) {
         showAidrError('Turn AIDR on first: scenarios are only meaningful with the guard running.');
         return;
     }
@@ -3180,7 +3325,8 @@ function renderCompare(data) {
 
         const blocked = !!run.blocked;
         const verdictText = blocked
-            ? `Blocked on ${run.block_type === 'input' ? 'input' : 'output'}`
+            ? (run.block_type === 'gateway' ? 'Blocked at gateway'
+                : `Blocked on ${run.block_type === 'input' ? 'input' : 'output'}`)
             : run.error ? 'Provider error' : 'Delivered';
 
         col.innerHTML = `
@@ -3193,8 +3339,9 @@ function renderCompare(data) {
         const bodyEl = document.createElement('div');
         bodyEl.className = 'compare-col-body';
         if (blocked) {
-            bodyEl.innerHTML =
-                '<div class="compare-blocked">AIDR stopped this turn — no model output was returned to the user.</div>';
+            bodyEl.innerHTML = run.block_type === 'gateway'
+                ? `<div class="compare-blocked">The Falcon AI Gateway refused this call inline — no model output was returned.${run.aidr && run.aidr.message ? ` <code>${escapeHtml(run.aidr.message)}</code>` : ''}</div>`
+                : '<div class="compare-blocked">AIDR stopped this turn — no model output was returned to the user.</div>';
         } else if (run.error) {
             bodyEl.innerHTML = `<div class="verdict-warning">${escapeHtml(run.error)}</div>`;
         } else {

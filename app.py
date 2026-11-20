@@ -700,6 +700,14 @@ DEFAULT_MODELS = {
         "gemma-3n-e4b-it",
     ],
     "ollama": [],  # Fetched dynamically from the Ollama instance
+    # The gateway proxies whatever the tenant has enabled; this is only the
+    # fallback when its /models endpoint can't be read.
+    "falcon_gateway": [
+        "gpt-5.1",
+        "gpt-5-mini",
+        "gpt-4.1",
+        "gpt-4o-mini",
+    ],
 }
 
 # Claude models that accept output_config.effort. Sending it to an older model
@@ -1141,10 +1149,18 @@ def _cached(key, factory):
     return client
 
 
-def call_openai(messages, api_key, model):
-    """Call OpenAI Chat Completions API. Returns (text, usage_dict)."""
+def _openai_client(api_key, base_url=None):
+    """OpenAI SDK client, optionally pointed at a compatible gateway."""
     from openai import OpenAI
-    client = _cached(("openai", api_key), lambda: OpenAI(api_key=api_key))
+    return _cached(
+        ("openai", api_key, base_url),
+        lambda: OpenAI(api_key=api_key, base_url=base_url),
+    )
+
+
+def call_openai(messages, api_key, model, base_url=None):
+    """Call OpenAI Chat Completions API. Returns (text, usage_dict)."""
+    client = _openai_client(api_key, base_url)
 
     limit_kwarg = (
         "max_completion_tokens"
@@ -1430,12 +1446,98 @@ def call_ollama(messages, ollama_url, model):
     return response.choices[0].message.content
 
 
+# ---------------------------------------------------------------------------
+# Falcon AI Gateway
+#
+# CrowdStrike's gateway fronts the model providers behind one endpoint per
+# cloud and speaks the OpenAI Chat Completions API at <BASE_URL>/openai/v1.
+# The gateway API key is only valid in the cloud it was created in.
+# ---------------------------------------------------------------------------
+FALCON_GATEWAY_CLOUDS = {
+    "us-1": "https://aigateway.us-1.crowdstrike.com",
+    "us-2": "https://aigateway.us-2.crowdstrike.com",
+    "eu-1": "https://aigateway.eu-1.crowdstrike.com",
+}
+DEFAULT_GATEWAY_URL = FALCON_GATEWAY_CLOUDS["us-2"]
+
+
+def falcon_gateway_openai_url(gateway_url):
+    """Base URL for the OpenAI SDK against a Falcon AI Gateway endpoint."""
+    root = (gateway_url or DEFAULT_GATEWAY_URL).strip().rstrip("/")
+    if not root.startswith(("http://", "https://")):
+        root = "https://" + root
+    return f"{root}/openai/v1"
+
+
+def call_falcon_gateway(messages, api_key, model, gateway_url=None):
+    """Chat Completions through the Falcon AI Gateway. Returns (text, usage)."""
+    return call_openai(
+        messages, api_key, model, base_url=falcon_gateway_openai_url(gateway_url)
+    )
+
+
+_GATEWAY_BLOCK_HINTS = (
+    "policy", "blocked", "block", "guard", "aidr", "violat", "denied",
+    "not allowed", "sensitive", "injection", "pii", "security",
+)
+
+
+def gateway_block_details(exc):
+    """
+    Recognise an inline policy block from the Falcon AI Gateway.
+
+    The gateway enforces AIDR policy itself, so a blocked turn comes back as
+    an HTTP error from the OpenAI SDK rather than a verdict we asked for. We
+    treat a 4xx whose message reads like a policy decision as a block, in the
+    same shape aidr_guard returns, so the UI renders it as one. Anything else
+    (bad key, wrong cloud, unknown model) stays an ordinary error.
+    """
+    try:
+        from openai import APIStatusError
+    except ImportError:
+        return None
+    if not isinstance(exc, APIStatusError):
+        return None
+
+    status = getattr(exc, "status_code", None)
+    if status not in (400, 403, 422, 451):
+        return None
+
+    body = getattr(exc, "body", None)
+    message = ""
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            message = err.get("message") or ""
+        elif isinstance(err, str):
+            message = err
+        message = message or body.get("message") or body.get("detail") or ""
+    message = str(message or getattr(exc, "message", "") or exc)
+
+    lowered = message.lower()
+    if not any(hint in lowered for hint in _GATEWAY_BLOCK_HINTS):
+        return None
+
+    return {
+        "status": "blocked",
+        "policy": "falcon_ai_gateway",
+        "detectors": [],
+        # The gateway doesn't return detector names; the panel says so
+        # instead of claiming a clean roster.
+        "detectors_unknown": True,
+        "message": message,
+        "http_status": status,
+        "raw": body if isinstance(body, dict) else None,
+    }
+
+
 # Provider dispatcher
 PROVIDERS = {
     "openai": call_openai,
     "anthropic": call_anthropic,
     "gemini": call_gemini,
     "ollama": call_ollama,
+    "falcon_gateway": call_falcon_gateway,
 }
 
 
@@ -1448,10 +1550,13 @@ def call_llm(messages, settings):
     model = settings.get("model", "gpt-5-mini")
     api_key = settings.get("api_key", "")
     ollama_url = settings.get("ollama_url", "http://localhost:11434")
+    gateway_url = settings.get("gateway_url", DEFAULT_GATEWAY_URL)
 
     if provider == "ollama":
         # call_ollama is left untouched and returns a bare string.
         return call_ollama(messages, ollama_url, model), None
+    elif provider == "falcon_gateway":
+        return call_falcon_gateway(messages, api_key, model, gateway_url)
     elif provider in PROVIDERS:
         return PROVIDERS[provider](messages, api_key, model)
     else:
@@ -1609,6 +1714,7 @@ def get_settings():
         "model": session.get("model", "gpt-4o-mini"),
         "persona": session.get("persona", "customer_support"),
         "ollama_url": session.get("ollama_url", "http://localhost:11434"),
+        "gateway_url": session.get("gateway_url", DEFAULT_GATEWAY_URL),
         "has_api_key": bool(session.get("api_key", "")),
     })
 
@@ -1627,14 +1733,17 @@ def save_settings():
         session["api_key"] = data["api_key"].strip()
     if "ollama_url" in data:
         session["ollama_url"] = data["ollama_url"]
+    if "gateway_url" in data and str(data["gateway_url"]).strip():
+        session["gateway_url"] = str(data["gateway_url"]).strip()
 
     return jsonify({"status": "ok"})
 
 
-def _live_openai_models(api_key):
-    from openai import OpenAI
-    client = _cached(("openai", api_key), lambda: OpenAI(api_key=api_key))
+def _live_openai_models(api_key, base_url=None, chat_only=True):
+    client = _openai_client(api_key, base_url)
     ids = [m.id for m in client.models.list()]
+    if not chat_only:
+        return sorted(set(ids))
     # Chat-capable models only — the list also carries embeddings, audio,
     # image and moderation models that this endpoint can't drive.
     chat = [
@@ -1671,10 +1780,20 @@ def _live_gemma_models(api_key):
     return sorted(set(names), reverse=True)
 
 
+def _live_falcon_gateway_models(api_key):
+    # The gateway may front non-OpenAI models, so don't filter by name.
+    return _live_openai_models(
+        api_key,
+        base_url=falcon_gateway_openai_url(session.get("gateway_url")),
+        chat_only=False,
+    )
+
+
 _LIVE_MODEL_FETCHERS = {
     "openai": _live_openai_models,
     "anthropic": _live_anthropic_models,
     "gemini": _live_gemma_models,
+    "falcon_gateway": _live_falcon_gateway_models,
 }
 
 
@@ -1688,6 +1807,12 @@ def get_models():
     has shipped, and fall back to the curated list when that fails.
     """
     provider = request.args.get("provider", session.get("provider", "openai"))
+
+    # The gateway picker sends its URL along so a cloud change is reflected
+    # before Settings are saved, the same as the Ollama URL.
+    gateway_url = request.args.get("gateway_url", "").strip()
+    if provider == "falcon_gateway" and gateway_url:
+        session["gateway_url"] = gateway_url
 
     if provider == "ollama":
         ollama_url = request.args.get("ollama_url", "").strip()
@@ -2042,6 +2167,7 @@ def chat():
     model = session.get("model", "gpt-5-mini")
     persona_key = session.get("persona", "customer_support")
     ollama_url = session.get("ollama_url", "http://localhost:11434")
+    gateway_url = session.get("gateway_url", DEFAULT_GATEWAY_URL)
 
     # Validate API key (not needed for Ollama)
     if provider != "ollama" and not api_key:
@@ -2133,6 +2259,7 @@ def chat():
             "api_key": api_key,
             "model": model,
             "ollama_url": ollama_url,
+            "gateway_url": gateway_url,
         }
         if use_tools:
             ai_response, usage = call_anthropic_tools(
@@ -2142,6 +2269,44 @@ def chat():
         else:
             ai_response, usage = call_llm(messages, settings)
     except Exception as e:
+        # --- Falcon AI Gateway inline block ---
+        # With in-app AIDR off, the gateway is the guard. Its refusal is a
+        # block, not a failure, and is shown and recorded as one.
+        gateway_block = (
+            gateway_block_details(e) if provider == "falcon_gateway" else None
+        )
+        if gateway_block:
+            _mark_block(chat_session, user_message)
+            gateway_event = _record_event(
+                chat_session, gateway_block, "gateway",
+                {
+                    "preview": user_message[:160],
+                    "message": gateway_block["message"],
+                    "detectors_unknown": True,
+                },
+            )
+            history.append({
+                "role": "user",
+                "content": user_message,
+                "aidr": gateway_block,
+                "blocked": "gateway",
+            })
+            chat_session["messages"] = _trim_history(history)
+            _save_chat_sessions()
+            return jsonify({
+                "response": None,
+                "blocked": True,
+                "block_type": "gateway",
+                "aidr": gateway_block,
+                "aidr_events": [
+                    ev for ev in (input_event, *turn_events, gateway_event) if ev
+                ],
+                "chat_id": chat_id,
+                "chat_title": chat_session["title"],
+                "aidr_triggered": True,
+                "message": "⚠️ Blocked by the Falcon AI Gateway: " + gateway_block["message"],
+            })
+
         traceback.print_exc()
         # Tool calls that did run before the failure are still worth showing.
         if tool_trace:
@@ -2150,7 +2315,7 @@ def chat():
         return jsonify({
             "error": f"LLM error: {str(e)}",
             "tool_calls": tool_trace or None,
-                "aidr_listing": listing_details,
+            "aidr_listing": listing_details,
             "aidr_events": [e for e in (input_event, *turn_events) if e],
         }), 500
 
@@ -2264,6 +2429,7 @@ def compare():
     model = session.get("model", "gpt-5-mini")
     persona_key = session.get("persona", "customer_support")
     ollama_url = session.get("ollama_url", "http://localhost:11434")
+    gateway_url = session.get("gateway_url", DEFAULT_GATEWAY_URL)
 
     if provider != "ollama" and not api_key:
         return jsonify({
@@ -2283,6 +2449,7 @@ def compare():
         "api_key": api_key,
         "model": model,
         "ollama_url": ollama_url,
+        "gateway_url": gateway_url,
     }
 
     # --- Guarded run ---
@@ -2315,8 +2482,18 @@ def compare():
         text, usage = call_llm(messages, settings)
         unguarded.update(response=text, usage=usage)
     except Exception as e:
-        traceback.print_exc()
-        unguarded.update(response=None, error=str(e))
+        gateway_block = (
+            gateway_block_details(e) if provider == "falcon_gateway" else None
+        )
+        if gateway_block:
+            # "Unguarded" only means in-app AIDR was off; the gateway still
+            # enforced its own policy, and that's the point of the comparison.
+            unguarded.update(
+                response=None, blocked=True, block_type="gateway", aidr=gateway_block,
+            )
+        else:
+            traceback.print_exc()
+            unguarded.update(response=None, error=str(e))
 
     return jsonify({
         "prompt": user_message,
